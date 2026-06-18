@@ -1,0 +1,3 @@
+# backend/requirements.txt
+# Requirements file for Python package dependencies.
+# List required packages (fastapi, uvicorn, sqlalchemy, qdrant-client, celery) here.
