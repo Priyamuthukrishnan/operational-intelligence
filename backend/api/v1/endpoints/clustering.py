@@ -37,7 +37,9 @@ router = APIRouter()
         "metrics, deduplicated issue clusters via semantic similarity, "
         "and time-based clusters at daily, weekly, and monthly granularity. "
         "Any generated issue clusters of size > 1 are persisted to the "
-        "PostgreSQL database and associated interactions are mapped."
+        "PostgreSQL database and associated interactions are mapped. "
+        "Includes repeat-issue clusters (parent/subticket) grouped "
+        "chronologically by semantic similarity."
     ),
 )
 def get_customer_clustering(

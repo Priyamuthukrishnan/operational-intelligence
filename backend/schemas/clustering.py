@@ -292,6 +292,50 @@ class TimeClusterResult(BaseModel):
     )
 
 
+class RepeatIssueCluster(BaseModel):
+    """A repeat-issue cluster of a customer consisting of a parent ticket and subtickets."""
+
+    parent_interaction_id: uuid.UUID = Field(
+        ..., description="The ID of the parent interaction (the earliest occurrence of the issue)"
+    )
+    parent_ticket_id: uuid.UUID = Field(
+        ..., description="The ticket ID of the parent interaction"
+    )
+    interaction_count: int = Field(
+        ..., description="Total count of interactions in this cluster (parent + subtickets)"
+    )
+    subticket_count: int = Field(
+        ..., description="Count of subtickets in this cluster (interaction_count - 1)"
+    )
+    interaction_ids: list[uuid.UUID] = Field(
+        default_factory=list,
+        description="All interaction UUIDs in the cluster in chronological order"
+    )
+    ticket_ids: list[uuid.UUID] = Field(
+        default_factory=list,
+        description="All ticket UUIDs in the cluster in chronological order"
+    )
+    subticket_ids: list[uuid.UUID] = Field(
+        default_factory=list,
+        description="Ticket UUIDs of all subtickets in the cluster in chronological order"
+    )
+    first_seen: datetime = Field(
+        ..., description="Timestamp of the earliest interaction in the cluster"
+    )
+    last_seen: datetime = Field(
+        ..., description="Timestamp of the most recent interaction in the cluster"
+    )
+    avg_similarity_score: float = Field(
+        ..., description="Average similarity score of the subtickets to the parent ticket"
+    )
+    avg_sentiment_score: Optional[float] = Field(
+        None, description="Average sentiment score across all interactions in the cluster"
+    )
+    avg_escalation_risk: Optional[float] = Field(
+        None, description="Average escalation risk score across all interactions in the cluster"
+    )
+
+
 # ── Customer Clustering Response ─────────────────────────────────────────
 
 
@@ -355,6 +399,10 @@ class CustomerClusteringResponse(BaseModel):
     )
     repeat_pattern_metadata: Optional[RepeatPatternMetadata] = Field(
         None, description="Aggregated repeat-issue statistics"
+    )
+    repeat_issue_clusters: list[RepeatIssueCluster] = Field(
+        default_factory=list,
+        description="Repeat issue clusters derived from chronological similarity matching",
     )
 
     # ── Phase 2: Customer, Issue, and Time-Based Clusters ────────────────
