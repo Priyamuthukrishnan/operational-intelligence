@@ -27,6 +27,16 @@ class Settings(BaseSettings):
     MISTRAL_API_KEY: Optional[str] = None
     LLM_MODEL: str = "mistral-small-latest"
 
+    # ── Qdrant Vector Store ──────────────────────────────────────────────
+    QDRANT_URL: Optional[str] = None
+    QDRANT_API_KEY: Optional[str] = None
+    QDRANT_COLLECTION_NAME: Optional[str] = None  # Must come from .env
+
+    # ── Clustering ───────────────────────────────────────────────────────
+    SIMILARITY_THRESHOLD: float = 0.75
+    SIMILARITY_SEARCH_LIMIT: int = 20
+    TIME_CLUSTER_MIN_INTERACTIONS: int = 1
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",
