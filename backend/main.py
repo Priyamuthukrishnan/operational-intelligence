@@ -58,6 +58,11 @@ app.include_router(api_router, prefix=settings.API_V1_PREFIX)
 
 # ── Health check ──────────────────────────────────────────────────────────
 
+@app.get("/", tags=["root"])
+def root() -> dict[str, str]:
+    """Root endpoint for basic API health and discovery."""
+    return {"message": "Operational Intelligence API"}
+
 @app.get("/health", tags=["health"])
 def health_check() -> dict[str, str]:
     """Liveness probe for orchestrators and load balancers."""

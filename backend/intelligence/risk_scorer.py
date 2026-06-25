@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from backend.models.operational_analysis import OperationalAnalysis
@@ -14,9 +14,13 @@ def _norm(value: Any) -> str:
     return str(value).strip().lower()
 
 
-def _hours_between(later: datetime | None, earlier: datetime | None) -> float | None:
-    if later is None or earlier is None:
-        return None
+def _hours_between(later, earlier):
+    if earlier.tzinfo is None:
+        earlier = earlier.replace(tzinfo=timezone.utc)
+
+    if later.tzinfo is None:
+        later = later.replace(tzinfo=timezone.utc)
+
     return max((later - earlier).total_seconds() / 3600.0, 0.0)
 
 
@@ -28,33 +32,62 @@ def _latest_non_null(history: list[OperationalAnalysis], attr: str) -> Any:
     return None
 
 
-def compute_escalation_level(latest: OperationalAnalysis) -> int:
-    source_used = _norm(latest.source_used)
+def compute_escalation_level(
+    latest: OperationalAnalysis,
+    ai_source_used: str | None = None,
+    recommendation_source: str | None = None,
+    approval_action: str | None = None,
+) -> int:
+    latest_source = _norm(ai_source_used)
+    recommendation_source = _norm(recommendation_source)
+    approval_action = _norm(approval_action)
 
-    if source_used == "manager" or latest.assigned_manager_id is not None:
+    if approval_action in {"escalated", "escalation_requested", "approved"}:
         return 35
-    if source_used == "human" or latest.assigned_agent_id is not None:
+    if recommendation_source in {"escalation", "manager", "supervisor", "urgent"}:
+        return 30
+    if latest_source in {"manager", "human"}:
         return 28
-    if source_used == "hybrid":
+    if latest_source == "hybrid":
         return 18
-    if source_used == "runbook":
+    if latest_source == "runbook":
         return 10
     return 0
 
 
-def compute_confidence_decay(history: list[OperationalAnalysis]) -> float:
-    confidences = [
-        row.root_cause_confidence
+def compute_confidence_decay(
+    history: list[OperationalAnalysis],
+    ai_confidences: list[float] | None = None,
+    latest_recommendation_source: str | None = None,
+    latest_approval_action: str | None = None,
+) -> float:
+    root_confidences = [
+        float(row.root_cause_confidence)
         for row in history
         if row.root_cause_confidence is not None
     ]
-    if len(confidences) < 2:
+    ai_confidences = [
+        float(value)
+        for value in (ai_confidences or [])
+        if value is not None
+    ]
+
+    source_history = root_confidences if len(root_confidences) >= 2 else ai_confidences
+    if len(source_history) < 2:
         return 0.0
 
-    oldest = confidences[0]
-    latest = confidences[-1]
+    oldest = source_history[0]
+    latest = source_history[-1]
     delta = latest - oldest
     decay = max(0.0, -delta * 40.0)
+
+    recommendation_source = _norm(latest_recommendation_source)
+    approval_action = _norm(latest_approval_action)
+    if recommendation_source in {"uncertain", "hold", "review", "human"}:
+        decay += 2.0
+    if approval_action in {"denied", "rejected", "escalation_requested"}:
+        decay += 3.0
+
     return round(min(decay, 20.0), 2)
 
 
@@ -88,36 +121,25 @@ def compute_sentiment_trend(history: list[OperationalAnalysis]) -> int:
     return 15
 
 
-def compute_ticket_momentum(history: list[OperationalAnalysis]) -> int:
-    if not history:
+def compute_ticket_momentum(
+    ticket_status: str | None = None,
+    latest_activity_at: datetime | None = None,
+) -> int:
+    latest_status = _norm(ticket_status)
+    if latest_status in {"resolved", "closed", "cancelled"}:
         return 0
 
-    latest = history[-1]
-    latest_state = _norm(latest.resolution_state)
-    latest_source = _norm(latest.source_used)
-    latest_ts = latest.captured_at
-    previous_ts = history[-2].captured_at if len(history) > 1 else None
-    earliest_ts = history[0].captured_at
-
-    if latest_state in {"resolved", "closed"}:
+    if latest_activity_at is None:
         return 0
 
-    gap_hours = _hours_between(latest_ts, previous_ts)
-    age_hours = _hours_between(latest_ts, earliest_ts)
-    elapsed = gap_hours if gap_hours is not None else age_hours
-
-    if latest_source in {"human", "manager"} and (
-        elapsed is None or elapsed >= 24.0
-    ):
-        return 20
-
-    if elapsed is None:
+    age_hours = _hours_between(datetime.now(timezone.utc), latest_activity_at)
+    if age_hours is None:
         return 0
-    if elapsed < 12.0:
+    if age_hours < 12.0:
         return 0
-    if elapsed < 24.0:
+    if age_hours < 24.0:
         return 5
-    if elapsed < 48.0:
+    if age_hours < 48.0:
         return 12
     return 18
 
@@ -125,22 +147,17 @@ def compute_ticket_momentum(history: list[OperationalAnalysis]) -> int:
 def apply_multiplier(
     history: list[OperationalAnalysis],
     signal_scores: dict[str, int | float],
+    escalation_source: str | None = None,
 ) -> tuple[float, str]:
-    latest = history[-1] if history else None
-    if latest is None:
+    if not history:
         return 1.0, "none"
 
-    source_used = _norm(latest.source_used)
+    source_used = _norm(escalation_source)
     escalation_level = int(signal_scores.get("escalation_level", 0))
     confidence_decay = float(signal_scores.get("confidence_decay", 0.0))
     repetition = int(signal_scores.get("semantic_repetition", 0))
     sentiment = int(signal_scores.get("sentiment_trend", 0))
     momentum = int(signal_scores.get("ticket_momentum", 0))
-
-    gap_hours = _hours_between(
-        latest.captured_at,
-        history[-2].captured_at if len(history) > 1 else history[0].captured_at,
-    )
 
     candidates: list[tuple[float, str, bool]] = [
         (
@@ -148,7 +165,7 @@ def apply_multiplier(
             "human escalation with no progress >48h",
             escalation_level >= 28
             and source_used in {"human", "manager"}
-            and (gap_hours is not None and gap_hours > 48.0),
+            and confidence_decay >= 8.0,
         ),
         (
             1.30,
@@ -203,12 +220,20 @@ def build_risk_reason(
     return "; ".join(parts)
 
 
-def compute(history: list[OperationalAnalysis]) -> dict[str, Any]:
+def compute(
+    history: list[OperationalAnalysis],
+    escalation_source: str | None = None,
+    recommendation_source: str | None = None,
+    approval_action: str | None = None,
+    ai_confidences: list[float] | None = None,
+    ticket_status: str | None = None,
+    latest_activity_at: datetime | None = None,
+) -> dict[str, Any]:
     if not history:
         return {
             "raw_score": 0,
             "final_score": 0,
-            "escalation_risk_score": 0,
+            "escalation_risk_score": 0.0,
             "escalation_risk_band": "LOW",
             "confidence_decay_score": 0.0,
             "momentum_score": 0.0,
@@ -226,23 +251,43 @@ def compute(history: list[OperationalAnalysis]) -> dict[str, Any]:
 
     latest = history[-1]
     signal_scores: dict[str, int | float] = {
-        "escalation_level": compute_escalation_level(latest),
-        "confidence_decay": compute_confidence_decay(history),
+        "escalation_level": compute_escalation_level(
+            latest,
+            ai_source_used=escalation_source,
+            recommendation_source=recommendation_source,
+            approval_action=approval_action,
+        ),
+        "confidence_decay": compute_confidence_decay(
+            history,
+            ai_confidences=ai_confidences,
+            latest_recommendation_source=recommendation_source,
+            latest_approval_action=approval_action,
+        ),
         "semantic_repetition": compute_semantic_repetition(history),
         "sentiment_trend": compute_sentiment_trend(history),
-        "ticket_momentum": compute_ticket_momentum(history),
+        "ticket_momentum": compute_ticket_momentum(
+            ticket_status=ticket_status,
+            latest_activity_at=latest_activity_at,
+        ),
     }
 
-    multiplier, multiplier_reason = apply_multiplier(history, signal_scores)
+    multiplier, multiplier_reason = apply_multiplier(
+        history,
+        signal_scores,
+        escalation_source=escalation_source,
+    )
     raw_score = sum(float(value) for value in signal_scores.values())
     final_score = normalize_score(raw_score * multiplier)
     band = map_risk_band(final_score)
     risk_reason = build_risk_reason(signal_scores, multiplier, multiplier_reason)
 
+    # Normalize to numeric(4,3): store as 0.000 - 1.000
+    normalized_score = round(final_score / 100.0, 3)
+
     return {
         "raw_score": raw_score,
         "final_score": final_score,
-        "escalation_risk_score": float(final_score),
+        "escalation_risk_score": normalized_score,
         "escalation_risk_band": band,
         "confidence_decay_score": float(signal_scores["confidence_decay"]),
         "momentum_score": float(signal_scores["ticket_momentum"]),

@@ -1,0 +1,13 @@
+[35mbackend/intelligence/risk_scorer.py[m[36m:[m    ai_[1;31msource_used[m: str | None = None,
+[35mbackend/intelligence/risk_scorer.py[m[36m:[m    latest_source = _norm(ai_[1;31msource_used[m)
+[35mbackend/intelligence/risk_scorer.py[m[36m:[m    [1;31msource_used[m = _norm(escalation_source)
+[35mbackend/intelligence/risk_scorer.py[m[36m:[m            and [1;31msource_used[m in {"human", "manager"}
+[35mbackend/intelligence/risk_scorer.py[m[36m:[m            and [1;31msource_used[m in {"human", "manager"}
+[35mbackend/intelligence/risk_scorer.py[m[36m:[m            ai_[1;31msource_used[m=escalation_source,
+[35mbackend/models/operational_analysis.py[m[36m:[m    [1;31msource_used[m = Column(String(20), nullable=True)
+[35mbackend/schemas/event.py[m[36m:[m    [1;31msource_used[m: Optional[str] = Field(
+[35mbackend/services/event_processor.py[m[36m:[m                [1;31msource_used[m=request.[1;31msource_used[m,
+[35mbackend/workers/risk_worker.py[m[36m:[m                SELECT [1;31msource_used[m, confidence_score
+[35mbackend/workers/risk_worker.py[m[36m:[m            if row["[1;31msource_used[m"] is not None:
+[35mbackend/workers/risk_worker.py[m[36m:[m                payload["escalation_source"] = row["[1;31msource_used[m"]
+[35msql/alter_operational_analysis_risk.sql[m[36m:[m    ADD COLUMN IF NOT EXISTS [1;31msource_used[m VARCHAR(20),
