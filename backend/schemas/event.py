@@ -46,6 +46,22 @@ class EventCaptureRequest(BaseModel):
         None, description="Specific comment within the ticket"
     )
 
+    # Risk escalation snapshot fields
+    source_used: Optional[str] = Field(
+        None,
+        description="How the issue was handled at this snapshot (rag, runbook, hybrid, human, manager)",
+    )
+    assigned_agent_id: Optional[uuid.UUID] = Field(
+        None, description="Assigned agent identifier at this snapshot"
+    )
+    assigned_manager_id: Optional[uuid.UUID] = Field(
+        None, description="Assigned manager identifier at this snapshot"
+    )
+    resolution_state: Optional[str] = Field(
+        None,
+        description="Resolution state snapshot (open, waiting, resolved, closed)",
+    )
+
     # Summarisation (optional enrichment)
     query_summary: Optional[str] = Field(
         None, description="AI-generated summary of the customer query"

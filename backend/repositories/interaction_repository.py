@@ -88,6 +88,34 @@ class InteractionRepository:
             .all()
         )
 
+    def get_ticket_history(
+        self, ticket_id: uuid.UUID
+    ) -> list[OperationalAnalysis]:
+        """Return the full history for a ticket ordered oldest to newest."""
+        return (
+            self._db.query(OperationalAnalysis)
+            .filter(OperationalAnalysis.ticket_id == ticket_id)
+            .order_by(
+                OperationalAnalysis.captured_at.asc(),
+                OperationalAnalysis.id.asc(),
+            )
+            .all()
+        )
+
+    def get_latest_analysis(
+        self, ticket_id: uuid.UUID
+    ) -> Optional[OperationalAnalysis]:
+        """Return the latest analysis row for a ticket."""
+        return (
+            self._db.query(OperationalAnalysis)
+            .filter(OperationalAnalysis.ticket_id == ticket_id)
+            .order_by(
+                OperationalAnalysis.captured_at.desc(),
+                OperationalAnalysis.id.desc(),
+            )
+            .first()
+        )
+
     # ── Update (future enrichment support) ───────────────────────────────
 
     def update(
@@ -128,3 +156,31 @@ class InteractionRepository:
             list(update_data.keys()),
         )
         return record
+
+    def update_risk_fields(
+        self,
+        analysis_id: uuid.UUID,
+        payload: dict,
+    ) -> None:
+        """Update the stored risk fields for one exact analysis row."""
+        allowed_payload = {
+            key: value
+            for key, value in payload.items()
+            if hasattr(OperationalAnalysis, key)
+        }
+        if not allowed_payload:
+            logger.warning(
+                "No risk fields applied for analysis_id=%s",
+                analysis_id,
+            )
+            return
+
+        self._db.query(OperationalAnalysis).filter(
+            OperationalAnalysis.id == analysis_id
+        ).update(allowed_payload, synchronize_session=False)
+        self._db.flush()
+        logger.info(
+            "Updated risk fields for OperationalAnalysis id=%s fields=%s",
+            analysis_id,
+            list(allowed_payload.keys()),
+        )
