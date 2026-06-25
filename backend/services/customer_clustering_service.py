@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import uuid
 from collections import defaultdict
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import func
@@ -37,6 +38,7 @@ from backend.schemas.clustering import (
     CustomerClusteringResponse,
     CustomerClusterSummary,
     IssueClusterGroup,
+    RepeatIssueCluster,
     RepeatIssueDetail,
     RepeatPatternMetadata,
     SimilarInteraction,
@@ -890,6 +892,139 @@ class CustomerClusteringService:
         )
         return time_cluster_results
 
+    def _cosine_similarity(self, v1: list[float], v2: list[float]) -> float:
+        """Calculate the cosine similarity between two vectors."""
+        if not v1 or not v2 or len(v1) != len(v2):
+            return 0.0
+        dot_product = sum(a * b for a, b in zip(v1, v2))
+        norm_v1 = sum(a * a for a in v1) ** 0.5
+        norm_v2 = sum(b * b for b in v2) ** 0.5
+        if norm_v1 == 0.0 or norm_v2 == 0.0:
+            return 0.0
+        return dot_product / (norm_v1 * norm_v2)
+
+    def build_repeat_issue_clusters(
+        self, customer_id: uuid.UUID, interactions: list[OperationalAnalysis]
+    ) -> list[RepeatIssueCluster]:
+        """Build Customer Repeat-Issue (Parent Ticket / Subticket) Clusters.
+
+        Rules:
+        - Earliest ticket for a customer issue becomes the parent ticket.
+        - Later semantically similar tickets from the same customer become subtickets.
+        - If no repeated similar ticket exists, repeat_issue_clusters should be empty.
+        - Same customer with unrelated issues should create separate parent groups internally
+          but should not appear as repeat_issue_clusters unless a group has more than one interaction.
+        """
+        # Step 1: Fetch Qdrant vectors for the customer's interactions
+        vector_data = self.fetch_customer_vectors(customer_id)
+        vector_map: dict[uuid.UUID, list[float]] = {
+            v["interaction_id"]: v["vector"] for v in vector_data if "vector" in v and v["vector"] is not None
+        }
+
+        # Step 2: Sort interactions by captured_at ascending (chronologically)
+        sorted_interactions = sorted(
+            interactions,
+            key=lambda x: x.captured_at if x.captured_at is not None else datetime.min.replace(tzinfo=timezone.utc),
+        )
+
+        # Step 3: Process chronologically
+        groups: list[dict] = []
+        similarity_threshold = self._settings.SIMILARITY_THRESHOLD
+
+        for interaction in sorted_interactions:
+            interaction_vector = vector_map.get(interaction.id)
+
+            matched_group = None
+            max_sim = -1.0
+
+            if interaction_vector is not None:
+                # Compare against previously discovered Parent Tickets
+                for group in groups:
+                    parent_interaction = group["parent"]
+                    parent_vector = vector_map.get(parent_interaction.id)
+                    if parent_vector is not None:
+                        sim = self._cosine_similarity(interaction_vector, parent_vector)
+                        if sim > max_sim:
+                            max_sim = sim
+                            matched_group = group
+
+            if matched_group is not None and max_sim >= similarity_threshold:
+                # Attach interaction to the matching Parent Ticket as a Subticket
+                matched_group["subtickets"].append(interaction)
+                matched_group["similarities"].append(max_sim)
+            else:
+                # Create a new Parent Ticket group
+                groups.append({
+                    "parent": interaction,
+                    "subtickets": [],
+                    "similarities": []
+                })
+
+        # Step 4: Build Parent/Subticket clusters where interaction_count > 1
+        repeat_issue_clusters = []
+        for group in groups:
+            parent = group["parent"]
+            subtickets = group["subtickets"]
+            similarities = group["similarities"]
+            interaction_count = 1 + len(subtickets)
+
+            if interaction_count > 1:
+                # Calculate averages
+                sentiment_scores = [
+                    i.sentiment_score
+                    for i in [parent] + subtickets
+                    if i.sentiment_score is not None
+                ]
+                avg_sentiment = (
+                    sum(sentiment_scores) / len(sentiment_scores)
+                    if sentiment_scores
+                    else None
+                )
+
+                escalation_risks = [
+                    i.escalation_risk_score
+                    for i in [parent] + subtickets
+                    if i.escalation_risk_score is not None
+                ]
+                avg_escalation = (
+                    sum(escalation_risks) / len(escalation_risks)
+                    if escalation_risks
+                    else None
+                )
+
+                avg_similarity = (
+                    sum(similarities) / len(similarities)
+                    if similarities
+                    else 0.0
+                )
+
+                # Date bounds
+                captured_dates = [
+                    i.captured_at
+                    for i in [parent] + subtickets
+                    if i.captured_at is not None
+                ]
+                first_seen = min(captured_dates) if captured_dates else parent.captured_at
+                last_seen = max(captured_dates) if captured_dates else parent.captured_at
+
+                cluster = RepeatIssueCluster(
+                    parent_interaction_id=parent.id,
+                    parent_ticket_id=parent.ticket_id,
+                    interaction_count=interaction_count,
+                    subticket_count=len(subtickets),
+                    interaction_ids=[parent.id] + [sub.id for sub in subtickets],
+                    ticket_ids=[parent.ticket_id] + [sub.ticket_id for sub in subtickets],
+                    subticket_ids=[sub.ticket_id for sub in subtickets],
+                    first_seen=first_seen,
+                    last_seen=last_seen,
+                    avg_similarity_score=round(avg_similarity, 4),
+                    avg_sentiment_score=round(avg_sentiment, 4) if avg_sentiment is not None else None,
+                    avg_escalation_risk=round(avg_escalation, 4) if avg_escalation is not None else None,
+                )
+                repeat_issue_clusters.append(cluster)
+
+        return repeat_issue_clusters
+
     # ── Clustering Orchestration ─────────────────────────────────────────
 
     def group_customer_issues(
@@ -1093,10 +1228,24 @@ class CustomerClusteringService:
                 exc,
             )
 
+        # ── Repeat Issue Clustering (Parent/Subticket) ────────────────────
+        repeat_issue_clusters = []
+        try:
+            repeat_issue_clusters = self.build_repeat_issue_clusters(
+                customer_id=customer_id,
+                interactions=interactions,
+            )
+        except Exception as exc:
+            logger.error(
+                "Repeat issue clustering failed for customer_id=%s: %s",
+                customer_id,
+                exc,
+            )
+
         logger.info(
             "Clustering readiness for customer_id=%s: ready=%s "
             "pending=%s vectors=%d/%d groups=%d "
-            "issue_clusters=%d time_clusters=%d",
+            "issue_clusters=%d time_clusters=%d repeat_issue_clusters=%d",
             customer_id,
             clustering_ready,
             pending_dependencies,
@@ -1105,6 +1254,7 @@ class CustomerClusteringService:
             len(similarity_groups),
             len(issue_clusters),
             len(time_clusters),
+            len(repeat_issue_clusters),
         )
 
         return CustomerClusteringResponse(
@@ -1123,4 +1273,5 @@ class CustomerClusteringService:
             issue_clusters=issue_clusters,
             time_clusters=time_clusters,
             persisted=persisted,
+            repeat_issue_clusters=repeat_issue_clusters,
         )
