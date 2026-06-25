@@ -206,18 +206,26 @@ def build_risk_reason(
     signal_scores: dict[str, int | float],
     multiplier: float,
     multiplier_reason: str,
-) -> str:
-    parts = [
-        f"level={signal_scores.get('escalation_level', 0)}",
-        f"confidence_decay={signal_scores.get('confidence_decay', 0)}",
-        f"repetition={signal_scores.get('semantic_repetition', 0)}",
-        f"sentiment={signal_scores.get('sentiment_trend', 0)}",
-        f"momentum={signal_scores.get('ticket_momentum', 0)}",
-        f"multiplier={multiplier:.2f}",
-    ]
-    if multiplier_reason != "none":
-        parts.append(multiplier_reason)
-    return "; ".join(parts)
+) -> dict:
+    signals = {
+        "escalation": int(signal_scores.get("escalation_level", 0)),
+        "confidence": float(signal_scores.get("confidence_decay", 0.0)),
+        "repetition": int(signal_scores.get("semantic_repetition", 0)),
+        "sentiment": int(signal_scores.get("sentiment_trend", 0)),
+        "momentum": int(signal_scores.get("ticket_momentum", 0)),
+    }
+
+    raw_score = sum(float(v) for v in signal_scores.values())
+
+    reason: dict = {
+        "signals": signals,
+        "raw_score": raw_score,
+        "multiplier": float(multiplier),
+    }
+    if multiplier_reason and multiplier_reason != "none":
+        reason["multiplier_reason"] = multiplier_reason
+
+    return reason
 
 
 def compute(
@@ -230,6 +238,14 @@ def compute(
     latest_activity_at: datetime | None = None,
 ) -> dict[str, Any]:
     if not history:
+        signal_scores = {
+            "escalation_level": 0,
+            "confidence_decay": 0.0,
+            "semantic_repetition": 0,
+            "sentiment_trend": 0,
+            "ticket_momentum": 0,
+        }
+        risk_reason = build_risk_reason(signal_scores, 1.0, "none")
         return {
             "raw_score": 0,
             "final_score": 0,
@@ -238,15 +254,9 @@ def compute(
             "confidence_decay_score": 0.0,
             "momentum_score": 0.0,
             "risk_multiplier": 1.0,
-            "risk_reason": "no history",
+            "risk_reason": risk_reason,
             "risk_processed": True,
-            "signal_scores": {
-                "escalation_level": 0,
-                "confidence_decay": 0.0,
-                "semantic_repetition": 0,
-                "sentiment_trend": 0,
-                "ticket_momentum": 0,
-            },
+            "signal_scores": signal_scores,
         }
 
     latest = history[-1]
