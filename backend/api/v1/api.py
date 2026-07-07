@@ -30,3 +30,11 @@ api_router.include_router(
     tags=["dashboard"],
 )
 
+# ── Intelligence ─────────────────────────────────────────────────────────
+api_router.include_router(
+    intelligence.router,
+    prefix="/intelligence",
+    tags=["intelligence"],
+)
+
+
