@@ -56,7 +56,7 @@ class OperationalAnalysis(Base):
 
     # ── Clustering / embeddings ──────────────────────────────────────────
     repeat_count = Column(Integer, nullable=True)
-    cluster_id = Column(UUID(as_uuid=True), nullable=True)
+    cluster_id = Column(UUID(as_uuid=True), nullable=True, index=True)
     qdrant_vector_id = Column(String(100), nullable=True)
 
     # ── Metadata ─────────────────────────────────────────────────────────
@@ -65,6 +65,7 @@ class OperationalAnalysis(Base):
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         nullable=False,
+        index=True,
         comment="Timestamp automatically set when the record is created",
     )
 

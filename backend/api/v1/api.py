@@ -5,7 +5,7 @@ API Version 1 Router. Includes and aggregates routers from endpoint modules.
 
 from fastapi import APIRouter
 
-from backend.api.v1.endpoints import clustering, events
+from backend.api.v1.endpoints import clustering, events, dashboard
 
 api_router = APIRouter()
 
@@ -22,3 +22,11 @@ api_router.include_router(
     prefix="/clustering",
     tags=["clustering"],
 )
+
+# ── Dashboards ───────────────────────────────────────────────────────────
+api_router.include_router(
+    dashboard.router,
+    prefix="/dashboard",
+    tags=["dashboard"],
+)
+

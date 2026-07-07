@@ -480,7 +480,7 @@ class CustomerClusteringService:
     # ── Similarity Group Builder ─────────────────────────────────────────
 
     def build_similarity_groups(
-        self, customer_id: uuid.UUID
+        self, customer_id: uuid.UUID, enriched_vectors: Optional[list[dict]] = None
     ) -> list[SimilarityGroup]:
         """Build similarity groups for a customer's interactions.
 
@@ -489,12 +489,14 @@ class CustomerClusteringService:
 
         Args:
             customer_id: UUID of the customer.
+            enriched_vectors: Optional pre-fetched vector list to avoid double-fetching.
 
         Returns:
             A list of :class:`SimilarityGroup`, one per interaction
             that has at least one similar match.
         """
-        enriched_vectors = self.fetch_customer_vectors(customer_id)
+        if enriched_vectors is None:
+            enriched_vectors = self.fetch_customer_vectors(customer_id)
 
         if not enriched_vectors:
             logger.info(
@@ -534,48 +536,6 @@ class CustomerClusteringService:
         )
         return groups
 
-    # ── Repeat Issue Detection ───────────────────────────────────────────
-
-    def detect_repeat_issues(
-        self, customer_id: uuid.UUID
-    ) -> list[RepeatIssueDetail]:
-        """Detect repeated customer issues using vector similarity.
-
-        Returns a list of RepeatIssueDetail for issue clusters of size > 1.
-        """
-        interactions = self.get_customer_interactions(customer_id)
-        similarity_groups = self.build_similarity_groups(customer_id)
-        if not similarity_groups:
-            return []
-        
-        issue_clusters = self.build_issue_clusters(interactions, similarity_groups)
-        
-        repeat_issues = []
-        for cluster in issue_clusters:
-            if cluster.interaction_count > 1:
-                rep_id = cluster.interaction_ids[0]
-                rep_vid = None
-                for i in interactions:
-                    if i.id == rep_id:
-                        rep_vid = i.qdrant_vector_id
-                        break
-                
-                avg_sim = cluster.avg_similarity_score
-                detail = RepeatIssueDetail(
-                    source_interaction_id=rep_id,
-                    source_vector_id=rep_vid or "",
-                    occurrence_count=cluster.interaction_count - 1,
-                    similarity_scores=[avg_sim] * (cluster.interaction_count - 1) if avg_sim is not None else [],
-                    avg_similarity=avg_sim,
-                )
-                repeat_issues.append(detail)
-                
-        logger.info(
-            "Detected %d repeat issue pattern(s) from clusters for customer_id=%s",
-            len(repeat_issues),
-            customer_id,
-        )
-        return repeat_issues
 
     # ── Phase 2: Customer-Based Clustering ───────────────────────────────
 
@@ -904,7 +864,10 @@ class CustomerClusteringService:
         return dot_product / (norm_v1 * norm_v2)
 
     def build_repeat_issue_clusters(
-        self, customer_id: uuid.UUID, interactions: list[OperationalAnalysis]
+        self,
+        customer_id: uuid.UUID,
+        interactions: list[OperationalAnalysis],
+        enriched_vectors: Optional[list[dict]] = None,
     ) -> list[RepeatIssueCluster]:
         """Build Customer Repeat-Issue (Parent Ticket / Subticket) Clusters.
 
@@ -916,9 +879,10 @@ class CustomerClusteringService:
           but should not appear as repeat_issue_clusters unless a group has more than one interaction.
         """
         # Step 1: Fetch Qdrant vectors for the customer's interactions
-        vector_data = self.fetch_customer_vectors(customer_id)
+        if enriched_vectors is None:
+            enriched_vectors = self.fetch_customer_vectors(customer_id)
         vector_map: dict[uuid.UUID, list[float]] = {
-            v["interaction_id"]: v["vector"] for v in vector_data if "vector" in v and v["vector"] is not None
+            v["interaction_id"]: v["vector"] for v in enriched_vectors if "vector" in v and v["vector"] is not None
         }
 
         # Step 2: Sort interactions by captured_at ascending (chronologically)
@@ -1098,10 +1062,12 @@ class CustomerClusteringService:
         issue_clusters: list[IssueClusterGroup] = []
         repeat_issues: list[RepeatIssueDetail] = []
         persisted = False
+        enriched_vectors: list[dict] = []
 
         if vectors_available > 0:
             try:
-                similarity_groups = self.build_similarity_groups(customer_id)
+                enriched_vectors = self.fetch_customer_vectors(customer_id)
+                similarity_groups = self.build_similarity_groups(customer_id, enriched_vectors=enriched_vectors)
                 if similarity_groups:
                     issue_clusters = self.build_issue_clusters(
                         interactions=interactions,
@@ -1234,6 +1200,7 @@ class CustomerClusteringService:
             repeat_issue_clusters = self.build_repeat_issue_clusters(
                 customer_id=customer_id,
                 interactions=interactions,
+                enriched_vectors=enriched_vectors,
             )
         except Exception as exc:
             logger.error(

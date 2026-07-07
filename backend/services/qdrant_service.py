@@ -1,13 +1,11 @@
 """
 backend/services/qdrant_service.py
-Read-only Qdrant Vector Database Service.
+Qdrant Vector Database Service.
 
-Provides vector retrieval and similarity search against a Qdrant collection.
-All configuration is loaded from environment variables via Settings — no
-hardcoded collection names, thresholds, or point IDs.
-
-This service is intentionally read-only: no upsert, delete, or update
-operations are exposed.
+Provides vector retrieval, similarity search, and upsert operations
+against a Qdrant collection.  All configuration is loaded from
+environment variables via Settings — no hardcoded collection names,
+thresholds, or point IDs.
 """
 
 from __future__ import annotations
@@ -298,3 +296,105 @@ class QdrantService:
                 "Qdrant similarity search failed: error=%s", exc
             )
             return []
+
+    # ── Vector Upsert ────────────────────────────────────────────────────
+
+    def upsert_vector(
+        self,
+        point_id: str,
+        vector: list[float],
+        payload: Optional[dict[str, Any]] = None,
+    ) -> bool:
+        """Upsert a single vector point into the Qdrant collection.
+
+        Creates a new point or overwrites an existing point with the
+        same ``point_id``.
+
+        Args:
+            point_id: The unique identifier for this point (typically
+                the OperationalAnalysis UUID).
+            vector: The dense embedding vector.
+            payload: Optional metadata dict attached to the point.
+
+        Returns:
+            ``True`` if the upsert succeeded, ``False`` otherwise.
+        """
+        coerced_id = self._coerce_point_id(point_id)
+
+        try:
+            from qdrant_client.models import PointStruct
+
+            point = PointStruct(
+                id=coerced_id,
+                vector=vector,
+                payload=payload or {},
+            )
+            self._client.upsert(
+                collection_name=self._collection_name,
+                points=[point],
+            )
+            logger.info(
+                "Upserted vector to Qdrant: point_id=%s collection=%s",
+                point_id,
+                self._collection_name,
+            )
+            return True
+
+        except Exception as exc:
+            logger.error(
+                "Failed to upsert vector to Qdrant: "
+                "point_id=%s error=%s",
+                point_id,
+                exc,
+            )
+            return False
+
+    def upsert_vectors(
+        self,
+        points: list[dict[str, Any]],
+    ) -> int:
+        """Batch-upsert multiple vector points.
+
+        Args:
+            points: A list of dicts, each containing::
+
+                {
+                    "id": str,           # point ID
+                    "vector": list[float],
+                    "payload": dict,     # optional
+                }
+
+        Returns:
+            The count of successfully upserted points.
+        """
+        if not points:
+            return 0
+
+        try:
+            from qdrant_client.models import PointStruct
+
+            qdrant_points = [
+                PointStruct(
+                    id=self._coerce_point_id(p["id"]),
+                    vector=p["vector"],
+                    payload=p.get("payload", {}),
+                )
+                for p in points
+            ]
+            self._client.upsert(
+                collection_name=self._collection_name,
+                points=qdrant_points,
+            )
+            logger.info(
+                "Batch-upserted %d vector(s) to Qdrant",
+                len(qdrant_points),
+            )
+            return len(qdrant_points)
+
+        except Exception as exc:
+            logger.error(
+                "Batch upsert to Qdrant failed: count=%d error=%s",
+                len(points),
+                exc,
+            )
+            return 0

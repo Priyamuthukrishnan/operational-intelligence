@@ -5,7 +5,7 @@ REST API endpoint definitions for receiving and processing interaction events.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.orm import Session
 
 from backend.api.deps import get_db
@@ -31,9 +31,10 @@ router = APIRouter()
 )
 def capture_event(
     payload: EventCaptureRequest,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ) -> EventCaptureResponse:
-    """Ingest a single interaction event.
+    """Ingest a single interaction event and trigger enrichment in the background.
 
     The endpoint validates the request body via Pydantic, delegates
     processing to :class:`EventProcessor`, and returns the generated
@@ -45,7 +46,8 @@ def capture_event(
     """
     try:
         processor = EventProcessor(db)
-        return processor.capture_event(payload)
+        return processor.capture_event(payload, background_tasks=background_tasks)
+
 
     except HTTPException:
         # Let explicit HTTP exceptions propagate untouched.

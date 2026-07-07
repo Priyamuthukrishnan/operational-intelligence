@@ -6,6 +6,8 @@ triggering database persistence, analysis, and metadata enrichment pipelines.
 
 from __future__ import annotations
 
+from typing import Any, Optional
+from fastapi import BackgroundTasks
 from sqlalchemy.orm import Session
 
 from backend.core.logging import setup_logger
@@ -16,6 +18,24 @@ from backend.schemas.event import EventCaptureRequest, EventCaptureResponse
 logger = setup_logger(__name__)
 
 
+def run_enrichment_task(operational_analysis_id_str: str) -> None:
+    """Background task to run enrichment and downstream clustering for a record."""
+    import uuid
+    from backend.db.session import SessionLocal
+    from backend.services.enrichment_orchestrator import EnrichmentOrchestrator
+
+    logger.info("Starting background enrichment task for ID: %s", operational_analysis_id_str)
+    db = SessionLocal()
+    try:
+        op_id = uuid.UUID(operational_analysis_id_str)
+        orchestrator = EnrichmentOrchestrator(db)
+        orchestrator.enrich_interaction(op_id)
+    except Exception as e:
+        logger.exception("Background enrichment task failed for ID %s: %s", operational_analysis_id_str, e)
+    finally:
+        db.close()
+
+
 class EventProcessor:
     """Service that processes inbound interaction events.
 
@@ -23,18 +43,24 @@ class EventProcessor:
     1. Map the validated request payload to the ORM model.
     2. Persist the record via the repository layer.
     3. Commit the transaction.
-    4. Return a structured response with the generated identifier.
+    4. Trigger the enrichment pipeline.
+    5. Return a structured response with the generated identifier.
     """
 
     def __init__(self, db: Session) -> None:
         self._db = db
         self._repository = InteractionRepository(db)
 
-    def capture_event(self, request: EventCaptureRequest) -> EventCaptureResponse:
-        """Process and persist an incoming interaction event.
+    def capture_event(
+        self,
+        request: EventCaptureRequest,
+        background_tasks: Optional[BackgroundTasks] = None,
+    ) -> EventCaptureResponse:
+        """Process, persist, and trigger enrichment for an incoming interaction event.
 
         Args:
             request: A validated :class:`EventCaptureRequest` payload.
+            background_tasks: Optional FastAPI BackgroundTasks for async execution.
 
         Returns:
             An :class:`EventCaptureResponse` containing the persisted
@@ -85,11 +111,26 @@ class EventProcessor:
                 operational_id,
             )
 
+            # Automatically trigger enrichment
+            if background_tasks is not None:
+                logger.info("Enqueuing background enrichment task for id=%s", operational_id)
+                background_tasks.add_task(run_enrichment_task, operational_id)
+            else:
+                logger.info("Running enrichment task synchronously for id=%s", operational_id)
+                try:
+                    run_enrichment_task(operational_id)
+                except Exception as enrichment_exc:
+                    # Log but do not fail the event capture if enrichment sync fails
+                    logger.exception(
+                        "Synchronous enrichment execution failed for id=%s",
+                        operational_id,
+                    )
+
             return EventCaptureResponse(
                 status="success",
                 message="Event captured successfully",
                 operational_analysis_id=operational_id,
-            )
+              )
 
         except Exception:
             self._db.rollback()
@@ -100,3 +141,4 @@ class EventProcessor:
                 request.ticket_id,
             )
             raise
+
