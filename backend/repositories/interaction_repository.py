@@ -105,10 +105,13 @@ class InteractionRepository:
     def get_latest_analysis(
         self, ticket_id: uuid.UUID
     ) -> Optional[OperationalAnalysis]:
-        """Return the latest analysis row for a ticket."""
+        """Return the latest processed analysis row for a ticket."""
         return (
             self._db.query(OperationalAnalysis)
-            .filter(OperationalAnalysis.ticket_id == ticket_id)
+            .filter(
+                OperationalAnalysis.ticket_id == ticket_id,
+                OperationalAnalysis.risk_processed == True,
+            )
             .order_by(
                 OperationalAnalysis.captured_at.desc(),
                 OperationalAnalysis.id.desc(),
