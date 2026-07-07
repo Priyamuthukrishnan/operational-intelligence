@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     DEBUG: bool = False
 
     # ── Database ─────────────────────────────────────────────────────────
-    DATABASE_URL: str = "postgresql://localhost:5432/operational_intelligence"
+    DATABASE_URL: str = "postgresql://neondb_owner:npg_1WPURqxkdfr8@ep-still-flower-aop7bzg5-pooler.c-2.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
 
     # ── API ──────────────────────────────────────────────────────────────
     API_V1_PREFIX: str = "/api/v1"

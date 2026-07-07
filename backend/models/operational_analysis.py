@@ -1,29 +1,17 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import (
-    Column,
-    DateTime,
-    Float,
-    Integer,
-    String,
-    Text,
-)
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String, Text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 from backend.db.base_class import Base
 
-class OperationalAnalysis(Base):
-    """Operational Intelligence analytics table.
 
-    Stores every captured interaction event together with optional enrichment
-    fields that are populated asynchronously by downstream intelligence
-    modules (summarisation, sentiment, escalation risk, root-cause, etc.).
-    """
+class OperationalAnalysis(Base):
+    """Operational Intelligence analytics table."""
 
     __tablename__ = "operational_analysis"
 
-    # ── Primary key ──────────────────────────────────────────────────────
     id = Column(
         UUID(as_uuid=True),
         primary_key=True,
@@ -32,34 +20,40 @@ class OperationalAnalysis(Base):
         comment="Auto-generated UUID primary key",
     )
 
-    # ── Source identifiers (from Service Intelligence) ───────────────────
     ai_analysis_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     ticket_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     customer_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     comment_id = Column(UUID(as_uuid=True), nullable=True)
 
-    # ── Summarisation ────────────────────────────────────────────────────
+    # Snapshot fields used by the risk escalation layer.
+    source_used = Column(String(20), nullable=True)
+    assigned_agent_id = Column(UUID(as_uuid=True), nullable=True)
+    assigned_manager_id = Column(UUID(as_uuid=True), nullable=True)
+    resolution_state = Column(String(20), nullable=True)
+
     query_summary = Column(Text, nullable=True)
     response_summary = Column(Text, nullable=True)
 
-    # ── Sentiment ────────────────────────────────────────────────────────
     sentiment_label = Column(String(50), nullable=True)
     sentiment_score = Column(Float, nullable=True)
 
-    # ── Escalation risk ──────────────────────────────────────────────────
     escalation_risk_score = Column(Float, nullable=True)
     escalation_risk_band = Column(String(50), nullable=True)
 
-    # ── Root cause ───────────────────────────────────────────────────────
     root_cause_category = Column(String(100), nullable=True)
     root_cause_confidence = Column(Float, nullable=True)
 
-    # ── Clustering / embeddings ──────────────────────────────────────────
     repeat_count = Column(Integer, nullable=True)
     cluster_id = Column(UUID(as_uuid=True), nullable=True, index=True)
     qdrant_vector_id = Column(String(100), nullable=True)
 
-    # ── Metadata ─────────────────────────────────────────────────────────
+    # Risk processing state.
+    confidence_decay_score = Column(Float, nullable=True)
+    momentum_score = Column(Float, nullable=True)
+    risk_multiplier = Column(Float, nullable=True)
+    risk_reason = Column(JSONB, nullable=True)
+    risk_processed = Column(Boolean, default=False, nullable=False)
+
     model_version = Column(String(50), nullable=True)
     captured_at = Column(
         DateTime(timezone=True),

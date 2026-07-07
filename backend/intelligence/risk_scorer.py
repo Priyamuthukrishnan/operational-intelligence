@@ -1,138 +1,308 @@
-"""
-backend/intelligence/risk_scorer.py
-Escalation Risk Scorer. Evaluates interaction features to compute an
-escalation-risk probability and risk-band classification.
-
-Uses a weighted rule-based model that combines:
-  - Sentiment polarity       (35 %)
-  - Repeat-issue frequency   (25 %)
-  - Resolution availability  (20 %)
-  - Root-cause severity       (20 %)
-
-No external ML model is required — the scorer runs entirely offline.
-"""
+"""Deterministic escalation risk scoring utilities."""
 
 from __future__ import annotations
 
-from typing import Optional
+from datetime import datetime, timezone
+from typing import Any
 
-from backend.core.logging import setup_logger
-
-logger = setup_logger(__name__)
-
-# ── Weight configuration ─────────────────────────────────────────────────
-
-_W_SENTIMENT: float = 0.35
-_W_REPEAT: float = 0.25
-_W_RESOLUTION: float = 0.20
-_W_ROOT_CAUSE: float = 0.20
-
-# ── Root-cause categories that indicate higher escalation risk ───────────
-
-_HIGH_RISK_CATEGORIES = frozenset({
-    "infrastructure_issue",
-    "security_concern",
-    "integration_failure",
-    "performance_degradation",
-    "data_loss",
-})
-
-# ── Risk-band thresholds ─────────────────────────────────────────────────
-
-_BAND_THRESHOLDS: list[tuple[float, str]] = [
-    (0.75, "critical"),
-    (0.50, "high"),
-    (0.25, "medium"),
-    (0.00, "low"),
-]
+from backend.models.operational_analysis import OperationalAnalysis
 
 
-class EscalationRiskScorer:
-    """Compute escalation-risk score and band for an interaction.
+def _norm(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value).strip().lower()
 
-    All inputs are optional — missing values are treated as neutral
-    (contribute 0.0 to the weighted sum).  This makes the scorer safe
-    to call even on partially-enriched records.
-    """
 
-    def score(
-        self,
-        *,
-        sentiment_label: Optional[str] = None,
-        sentiment_score: Optional[float] = None,
-        repeat_count: Optional[int] = None,
-        has_resolution: bool = True,
-        root_cause_category: Optional[str] = None,
-    ) -> tuple[float, str]:
-        """Compute the escalation-risk score.
+def _hours_between(later, earlier):
+    if earlier.tzinfo is None:
+        earlier = earlier.replace(tzinfo=timezone.utc)
 
-        Args:
-            sentiment_label: ``"positive"``, ``"neutral"``, or ``"negative"``.
-            sentiment_score: Score in ``[-1.0, 1.0]``.
-            repeat_count: How many times the issue has recurred.
-            has_resolution: ``False`` if no resolution exists yet.
-            root_cause_category: Predicted root-cause category string.
+    if later.tzinfo is None:
+        later = later.replace(tzinfo=timezone.utc)
 
-        Returns:
-            A ``(score, band)`` tuple where score is in ``[0.0, 1.0]``
-            and band is one of ``"low"``, ``"medium"``, ``"high"``,
-            ``"critical"``.
-        """
-        # ── Sentiment factor (negative → higher risk) ────────────────────
-        sentiment_factor = 0.0
-        if sentiment_score is not None:
-            # Map [-1, 1] → [1, 0] so that negative sentiment = high risk
-            sentiment_factor = (1.0 - sentiment_score) / 2.0
-        elif sentiment_label is not None:
-            sentiment_factor = {
-                "negative": 0.8,
-                "neutral": 0.4,
-                "positive": 0.1,
-            }.get(sentiment_label.lower(), 0.4)
+    return max((later - earlier).total_seconds() / 3600.0, 0.0)
 
-        # ── Repeat factor (more repeats → higher risk) ───────────────────
-        repeat_factor = 0.0
-        if repeat_count is not None and repeat_count > 0:
-            # Saturating curve: 1 repeat → 0.4, 3 → 0.8, 5+ → ~1.0
-            repeat_factor = min(1.0, repeat_count * 0.2)
 
-        # ── Resolution factor (unresolved → higher risk) ─────────────────
-        resolution_factor = 0.0 if has_resolution else 1.0
+def _latest_non_null(history: list[OperationalAnalysis], attr: str) -> Any:
+    for row in reversed(history):
+        value = getattr(row, attr, None)
+        if value is not None:
+            return value
+    return None
 
-        # ── Root-cause severity factor ───────────────────────────────────
-        root_cause_factor = 0.0
-        if root_cause_category is not None:
-            if root_cause_category.lower() in _HIGH_RISK_CATEGORIES:
-                root_cause_factor = 0.8
-            else:
-                root_cause_factor = 0.3
 
-        # ── Weighted composite ───────────────────────────────────────────
-        raw_score = (
-            _W_SENTIMENT * sentiment_factor
-            + _W_REPEAT * repeat_factor
-            + _W_RESOLUTION * resolution_factor
-            + _W_ROOT_CAUSE * root_cause_factor
-        )
+def compute_escalation_level(
+    latest: OperationalAnalysis,
+    ai_source_used: str | None = None,
+    recommendation_source: str | None = None,
+    approval_action: str | None = None,
+) -> int:
+    latest_source = _norm(ai_source_used)
+    recommendation_source = _norm(recommendation_source)
+    approval_action = _norm(approval_action)
 
-        # Clamp to [0, 1]
-        score = max(0.0, min(1.0, round(raw_score, 4)))
+    if approval_action in {"escalated", "escalation_requested", "approved"}:
+        return 35
+    if recommendation_source in {"escalation", "manager", "supervisor", "urgent"}:
+        return 30
+    if latest_source in {"manager", "human"}:
+        return 28
+    if latest_source == "hybrid":
+        return 18
+    if latest_source == "runbook":
+        return 10
+    return 0
 
-        # ── Band classification ──────────────────────────────────────────
-        band = "low"
-        for threshold, label in _BAND_THRESHOLDS:
-            if score >= threshold:
-                band = label
-                break
 
-        logger.debug(
-            "Escalation risk: score=%.4f band=%s "
-            "(sentiment=%.2f repeat=%.2f resolution=%.2f root_cause=%.2f)",
-            score,
-            band,
-            sentiment_factor,
-            repeat_factor,
-            resolution_factor,
-            root_cause_factor,
-        )
-        return score, band
+def compute_confidence_decay(
+    history: list[OperationalAnalysis],
+    ai_confidences: list[float] | None = None,
+    latest_recommendation_source: str | None = None,
+    latest_approval_action: str | None = None,
+) -> float:
+    root_confidences = [
+        float(row.root_cause_confidence)
+        for row in history
+        if row.root_cause_confidence is not None
+    ]
+    ai_confidences = [
+        float(value)
+        for value in (ai_confidences or [])
+        if value is not None
+    ]
+
+    source_history = root_confidences if len(root_confidences) >= 2 else ai_confidences
+    if len(source_history) < 2:
+        return 0.0
+
+    oldest = source_history[0]
+    latest = source_history[-1]
+    delta = latest - oldest
+    decay = max(0.0, -delta * 40.0)
+
+    recommendation_source = _norm(latest_recommendation_source)
+    approval_action = _norm(latest_approval_action)
+    if recommendation_source in {"uncertain", "hold", "review", "human"}:
+        decay += 2.0
+    if approval_action in {"denied", "rejected", "escalation_requested"}:
+        decay += 3.0
+
+    return round(min(decay, 20.0), 2)
+
+
+def compute_semantic_repetition(history: list[OperationalAnalysis]) -> int:
+    repeat_count = _latest_non_null(history, "repeat_count")
+    if repeat_count is None:
+        repeat_count = 0
+
+    repeat_count = int(repeat_count)
+    if repeat_count <= 0:
+        return 0
+    if repeat_count == 1:
+        return 6
+    if repeat_count <= 3:
+        return 12
+    return 20
+
+
+def compute_sentiment_trend(history: list[OperationalAnalysis]) -> int:
+    sentiment = _latest_non_null(history, "sentiment_score")
+    if sentiment is None:
+        return 0
+
+    sentiment = float(sentiment)
+    if sentiment >= 0:
+        return 0
+    if sentiment >= -0.20:
+        return 4
+    if sentiment >= -0.40:
+        return 9
+    return 15
+
+
+def compute_ticket_momentum(
+    ticket_status: str | None = None,
+    latest_activity_at: datetime | None = None,
+) -> int:
+    latest_status = _norm(ticket_status)
+    if latest_status in {"resolved", "closed", "cancelled"}:
+        return 0
+
+    if latest_activity_at is None:
+        return 0
+
+    age_hours = _hours_between(datetime.now(timezone.utc), latest_activity_at)
+    if age_hours is None:
+        return 0
+    if age_hours < 12.0:
+        return 0
+    if age_hours < 24.0:
+        return 5
+    if age_hours < 48.0:
+        return 12
+    return 18
+
+
+def apply_multiplier(
+    history: list[OperationalAnalysis],
+    signal_scores: dict[str, int | float],
+    escalation_source: str | None = None,
+) -> tuple[float, str]:
+    if not history:
+        return 1.0, "none"
+
+    source_used = _norm(escalation_source)
+    escalation_level = int(signal_scores.get("escalation_level", 0))
+    confidence_decay = float(signal_scores.get("confidence_decay", 0.0))
+    repetition = int(signal_scores.get("semantic_repetition", 0))
+    sentiment = int(signal_scores.get("sentiment_trend", 0))
+    momentum = int(signal_scores.get("ticket_momentum", 0))
+
+    candidates: list[tuple[float, str, bool]] = [
+        (
+            1.35,
+            "human escalation with no progress >48h",
+            escalation_level >= 28
+            and source_used in {"human", "manager"}
+            and confidence_decay >= 8.0,
+        ),
+        (
+            1.30,
+            "negative sentiment with human stagnation",
+            sentiment > 0
+            and source_used in {"human", "manager"}
+            and momentum >= 12,
+        ),
+        (
+            1.25,
+            "low confidence with high repetition",
+            confidence_decay >= 8.0 and repetition >= 12,
+        ),
+    ]
+
+    for multiplier, reason, applies in candidates:
+        if applies:
+            return multiplier, reason
+
+    return 1.0, "none"
+
+
+def normalize_score(score: float) -> int:
+    return max(0, min(100, int(round(score))))
+
+
+def map_risk_band(score: int) -> str:
+    if score <= 24:
+        return "LOW"
+    if score <= 49:
+        return "MEDIUM"
+    if score <= 74:
+        return "HIGH"
+    return "CRITICAL"
+
+
+def build_risk_reason(
+    signal_scores: dict[str, int | float],
+    multiplier: float,
+    multiplier_reason: str,
+) -> dict:
+    signals = {
+        "escalation": int(signal_scores.get("escalation_level", 0)),
+        "confidence": float(signal_scores.get("confidence_decay", 0.0)),
+        "repetition": int(signal_scores.get("semantic_repetition", 0)),
+        "sentiment": int(signal_scores.get("sentiment_trend", 0)),
+        "momentum": int(signal_scores.get("ticket_momentum", 0)),
+    }
+
+    raw_score = sum(float(v) for v in signal_scores.values())
+
+    reason: dict = {
+        "signals": signals,
+        "raw_score": raw_score,
+        "multiplier": float(multiplier),
+    }
+    if multiplier_reason and multiplier_reason != "none":
+        reason["multiplier_reason"] = multiplier_reason
+
+    return reason
+
+
+def compute(
+    history: list[OperationalAnalysis],
+    escalation_source: str | None = None,
+    recommendation_source: str | None = None,
+    approval_action: str | None = None,
+    ai_confidences: list[float] | None = None,
+    ticket_status: str | None = None,
+    latest_activity_at: datetime | None = None,
+) -> dict[str, Any]:
+    if not history:
+        signal_scores = {
+            "escalation_level": 0,
+            "confidence_decay": 0.0,
+            "semantic_repetition": 0,
+            "sentiment_trend": 0,
+            "ticket_momentum": 0,
+        }
+        risk_reason = build_risk_reason(signal_scores, 1.0, "none")
+        return {
+            "raw_score": 0,
+            "final_score": 0,
+            "escalation_risk_score": 0.0,
+            "escalation_risk_band": "LOW",
+            "confidence_decay_score": 0.0,
+            "momentum_score": 0.0,
+            "risk_multiplier": 1.0,
+            "risk_reason": risk_reason,
+            "risk_processed": True,
+            "signal_scores": signal_scores,
+        }
+
+    latest = history[-1]
+    signal_scores: dict[str, int | float] = {
+        "escalation_level": compute_escalation_level(
+            latest,
+            ai_source_used=escalation_source,
+            recommendation_source=recommendation_source,
+            approval_action=approval_action,
+        ),
+        "confidence_decay": compute_confidence_decay(
+            history,
+            ai_confidences=ai_confidences,
+            latest_recommendation_source=recommendation_source,
+            latest_approval_action=approval_action,
+        ),
+        "semantic_repetition": compute_semantic_repetition(history),
+        "sentiment_trend": compute_sentiment_trend(history),
+        "ticket_momentum": compute_ticket_momentum(
+            ticket_status=ticket_status,
+            latest_activity_at=latest_activity_at,
+        ),
+    }
+
+    multiplier, multiplier_reason = apply_multiplier(
+        history,
+        signal_scores,
+        escalation_source=escalation_source,
+    )
+    raw_score = sum(float(value) for value in signal_scores.values())
+    final_score = normalize_score(raw_score * multiplier)
+    band = map_risk_band(final_score)
+    risk_reason = build_risk_reason(signal_scores, multiplier, multiplier_reason)
+
+    # Normalize to numeric(4,3): store as 0.000 - 1.000
+    normalized_score = round(final_score / 100.0, 3)
+
+    return {
+        "raw_score": raw_score,
+        "final_score": final_score,
+        "escalation_risk_score": normalized_score,
+        "escalation_risk_band": band,
+        "confidence_decay_score": float(signal_scores["confidence_decay"]),
+        "momentum_score": float(signal_scores["ticket_momentum"]),
+        "risk_multiplier": multiplier,
+        "risk_reason": risk_reason,
+        "risk_processed": True,
+        "signal_scores": signal_scores,
+    }
