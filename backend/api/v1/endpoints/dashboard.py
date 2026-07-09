@@ -6,6 +6,7 @@ REST API endpoints for executive summary metrics and operational dashboards data
 from __future__ import annotations
 
 import uuid
+from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 

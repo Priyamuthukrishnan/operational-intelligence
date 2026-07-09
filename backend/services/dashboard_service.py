@@ -43,7 +43,7 @@ class DashboardService:
         categories = self.repo.get_top_categories(limit=5)
         clusters = self.repo.get_recent_clusters(limit=5)
 
-        resolution_rate = stats["resolution_rate"]
+        resolution_rate = 0.0
         if stats["total_tickets"] > 0:
             resolution_rate = round(stats["resolved_tickets"] / stats["total_tickets"], 4)
 

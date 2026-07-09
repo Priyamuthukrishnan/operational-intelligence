@@ -22,7 +22,7 @@ class OperationalAnalysis(Base):
 
     ai_analysis_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     ticket_id = Column(UUID(as_uuid=True), nullable=False, index=True)
-    customer_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    customer_id = Column(UUID(as_uuid=True), nullable=True, index=True)
     comment_id = Column(UUID(as_uuid=True), nullable=True)
 
     # Snapshot fields used by the risk escalation layer.
@@ -34,18 +34,18 @@ class OperationalAnalysis(Base):
     query_summary = Column(Text, nullable=True)
     response_summary = Column(Text, nullable=True)
 
-    sentiment_label = Column(String(50), nullable=True)
+    sentiment_label = Column(Text, nullable=True)
     sentiment_score = Column(Float, nullable=True)
 
     escalation_risk_score = Column(Float, nullable=True)
-    escalation_risk_band = Column(String(50), nullable=True)
+    escalation_risk_band = Column(Text, nullable=True)
 
-    root_cause_category = Column(String(100), nullable=True)
+    root_cause_category = Column(Text, nullable=True)
     root_cause_confidence = Column(Float, nullable=True)
 
     repeat_count = Column(Integer, nullable=True)
     cluster_id = Column(UUID(as_uuid=True), nullable=True, index=True)
-    qdrant_vector_id = Column(String(100), nullable=True)
+    qdrant_vector_id = Column(Text, nullable=True)
 
     # Risk processing state.
     confidence_decay_score = Column(Float, nullable=True)
@@ -54,7 +54,7 @@ class OperationalAnalysis(Base):
     risk_reason = Column(JSONB, nullable=True)
     risk_processed = Column(Boolean, default=False, nullable=False)
 
-    model_version = Column(String(50), nullable=True)
+    model_version = Column(Text, nullable=True)
     captured_at = Column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),

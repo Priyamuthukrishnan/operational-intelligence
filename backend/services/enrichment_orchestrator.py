@@ -24,10 +24,11 @@ from backend.repositories.interaction_repository import InteractionRepository
 from backend.intelligence.llm_client import LLMClient
 from backend.intelligence.summarizer import SummarizationEngine
 from backend.intelligence.sentiment import SentimentEngine
-from backend.intelligence.risk_scorer import EscalationRiskScorer
+from backend.intelligence.risk_scorer import compute as compute_escalation_risk
 from backend.intelligence.root_cause import RootCauseEngine
 from backend.embeddings.generator import EmbeddingGenerator
 from backend.services.qdrant_service import QdrantService
+from backend.services.embedding_client import EmbeddingClient
 
 logger = setup_logger(__name__)
 
@@ -45,7 +46,6 @@ class EnrichmentOrchestrator:
         self.llm = LLMClient()
         self.summarizer = SummarizationEngine(self.llm)
         self.sentiment_engine = SentimentEngine(self.llm)
-        self.risk_scorer = EscalationRiskScorer()
         self.root_cause_engine = RootCauseEngine(self.llm)
         self.embedding_generator = EmbeddingGenerator()
 
@@ -58,6 +58,24 @@ class EnrichmentOrchestrator:
             logger.warning(
                 "Qdrant service unavailable for enrichment. "
                 "Vector generation will be skipped: %s",
+                exc,
+            )
+
+        # ── Initialize External Embedding Service Client ─────────────────
+        self.embedding_client: Optional[EmbeddingClient] = None
+        try:
+            self.embedding_client = EmbeddingClient()
+            if not self.embedding_client.is_available:
+                logger.warning(
+                    "External embedding client initialised but unavailable"
+                )
+                self.embedding_client = None
+            else:
+                logger.info("External embedding client successfully initialized")
+        except Exception as exc:
+            logger.warning(
+                "External embedding client init failed. "
+                "External embedding ingestion will be skipped: %s",
                 exc,
             )
 
@@ -180,14 +198,15 @@ class EnrichmentOrchestrator:
 
             # Step 6: Run Escalation Risk Scorer
             logger.info("Calculating escalation risk and classification band")
-            has_resolution = response_summary is not None
-            risk_score, risk_band = self.risk_scorer.score(
-                sentiment_label=sentiment_label,
-                sentiment_score=sentiment_score,
-                repeat_count=record.repeat_count,
-                has_resolution=has_resolution,
-                root_cause_category=rc_cat,
-            )
+            ticket_history = self.repository.get_ticket_history(record.ticket_id)
+            risk_result = compute_escalation_risk(ticket_history)
+            risk_score = risk_result["escalation_risk_score"]
+            risk_band = risk_result["escalation_risk_band"]
+            confidence_decay_score = risk_result["confidence_decay_score"]
+            momentum_score = risk_result["momentum_score"]
+            risk_multiplier = risk_result["risk_multiplier"]
+            risk_reason = risk_result["risk_reason"]
+            risk_processed = risk_result["risk_processed"]
 
             # Step 7: Generate Embedding and Upsert to Qdrant
             qdrant_vector_id = None
@@ -225,6 +244,43 @@ class EnrichmentOrchestrator:
                 else:
                     logger.warning("Embedding generation returned None")
 
+            # Step 7b: Send enriched data to external embedding service
+            if self.embedding_client is not None:
+                try:
+                    logger.info(
+                        "Sending enriched data to external embedding service "
+                        "for operational_analysis_id=%s",
+                        operational_analysis_id,
+                    )
+                    ext_vector_id = self.embedding_client.ingest(
+                        operational_analysis_id=operational_analysis_id,
+                        ticket_id=record.ticket_id,
+                        customer_id=customer_id,
+                        query_summary=query_summary,
+                        response_summary=response_summary,
+                        sentiment_label=sentiment_label,
+                        sentiment_score=sentiment_score,
+                        root_cause_category=rc_cat,
+                        root_cause_confidence=rc_conf,
+                        escalation_risk_score=risk_score,
+                        escalation_risk_band=risk_band,
+                        captured_at=record.captured_at.isoformat() if getattr(record, "captured_at", None) else None,
+                    )
+                    if ext_vector_id and qdrant_vector_id is None:
+                        qdrant_vector_id = ext_vector_id
+                        logger.info(
+                            "Using external embedding service vector_id=%s "
+                            "as qdrant_vector_id",
+                            ext_vector_id,
+                        )
+                except Exception as emb_exc:
+                    logger.warning(
+                        "External embedding service ingestion failed for "
+                        "operational_analysis_id=%s: %s. Continuing enrichment.",
+                        operational_analysis_id,
+                        emb_exc,
+                    )
+
             # Step 8: Update PostgreSQL record via repository
             update_data = {
                 "customer_id": customer_id,
@@ -236,6 +292,11 @@ class EnrichmentOrchestrator:
                 "root_cause_confidence": rc_conf,
                 "escalation_risk_score": risk_score,
                 "escalation_risk_band": risk_band,
+                "confidence_decay_score": confidence_decay_score,
+                "momentum_score": momentum_score,
+                "risk_multiplier": risk_multiplier,
+                "risk_reason": risk_reason,
+                "risk_processed": risk_processed,
                 "qdrant_vector_id": qdrant_vector_id,
                 "model_version": self.llm.model_version,
             }

@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     QDRANT_API_KEY: Optional[str] = None
     QDRANT_COLLECTION_NAME: Optional[str] = None  # Must come from .env
 
+    # ── External Embedding Service ───────────────────────────────────────
+    EMBEDDING_SERVICE_URL: Optional[str] = "http://127.0.0.1:8001"
+
     # ── Clustering ───────────────────────────────────────────────────────
     SIMILARITY_THRESHOLD: float = 0.75
     SIMILARITY_SEARCH_LIMIT: int = 20

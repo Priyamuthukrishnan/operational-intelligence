@@ -4,7 +4,7 @@ SQLAlchemy database model representing ML-generated issue/topic clusters and cat
 """
 
 import uuid
-from sqlalchemy import Column, Integer, Text, DateTime
+from sqlalchemy import Column, Integer, Text, DateTime, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
 from backend.db.base_class import Base
 
@@ -25,7 +25,7 @@ class IssueCluster(Base):
     )
     cluster_name = Column(Text, nullable=True)
     issue_category = Column(Text, nullable=True)
-    root_cause_category = Column(Text, nullable=True)
-    frequency_count = Column(Integer, nullable=True)
+    root_cause_category = Column(Text, ForeignKey("root_cause_taxonomy.category"), nullable=True, index=True)
+    frequency_count = Column(Integer, nullable=False, default=0)
     first_seen_at = Column(DateTime(timezone=True), nullable=True)
     last_seen_at = Column(DateTime(timezone=True), nullable=True)
