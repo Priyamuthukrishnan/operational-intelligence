@@ -8,6 +8,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.orm import Session
 
+# pyrefly: ignore [missing-import]
 from api.deps import get_db
 from core.logging import setup_logger
 from schemas.event import EventCaptureRequest, EventCaptureResponse
@@ -21,7 +22,7 @@ router = APIRouter()
 @router.post(
     "/capture",
     response_model=EventCaptureResponse,
-    status_code=status.HTTP_201_CREATED,
+    status_code=status.HTTP_202_ACCEPTED,
     summary="Capture an interaction event",
     description=(
         "Receives a ticket interaction event from the Service Intelligence "

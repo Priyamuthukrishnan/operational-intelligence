@@ -114,27 +114,16 @@ class EnrichmentOrchestrator:
                 record.customer_id,
             )
 
-            # Step 2: Fetch raw ticket and AI analysis source text
-            source_query = text("""
-                SELECT
-                    t.title,
-                    t.description,
-                    t.customer_name,
-                    t.created_by,
-                    t.resolution,
-                    a.runbook_resolution,
-                    a.rag_resolution,
-                    a.decision_reason
-                FROM tickets t
-                LEFT JOIN ai_analysis a ON a.ticket_id = t.id
-                WHERE t.id = :ticket_id
+            # Step 2: Fetch raw ticket and AI analysis source text for complete issue chain
+            main_ticket_query = text("""
+                SELECT id, title, description, customer_name, created_by, resolution, status, created_at, updated_at, assigned_to
+                FROM tickets
+                WHERE id = :ticket_id
                 LIMIT 1
             """)
-            source_row = self.db.execute(
-                source_query, {"ticket_id": record.ticket_id}
-            ).fetchone()
+            main_ticket = self.db.execute(main_ticket_query, {"ticket_id": record.ticket_id}).mappings().first()
 
-            if source_row is None:
+            if main_ticket is None:
                 logger.error(
                     "Enrichment aborted — ticket source record not found "
                     "in tickets table for ticket_id=%s",
@@ -142,17 +131,173 @@ class EnrichmentOrchestrator:
                 )
                 return False
 
-            title, description, customer_name, created_by, t_res, r_res, rag_res, dec_reason = source_row
-            logger.info("Retrieved source ticket and AI analysis columns successfully")
+            # Query all related sub-tickets
+            sub_tickets_query = text("""
+                SELECT id, title, description, resolution, status, created_at, updated_at, assigned_to, created_by
+                FROM sub_tickets
+                WHERE ticket_id = :ticket_id
+                ORDER BY created_at ASC
+            """)
+            sub_tickets = self.db.execute(sub_tickets_query, {"ticket_id": record.ticket_id}).mappings().all()
+
+            # Query main ticket AI analysis
+            main_ai_query = text("""
+                SELECT id, runbook_resolution, rag_resolution, decision_reason, confidence_score, source_used
+                FROM ai_analysis
+                WHERE ticket_id = :ticket_id
+                LIMIT 1
+            """)
+            main_ai = self.db.execute(main_ai_query, {"ticket_id": record.ticket_id}).mappings().first()
+
+            # Query sub-tickets AI analysis
+            sub_ticket_ids = [st["id"] for st in sub_tickets]
+            sub_ais = []
+            if sub_ticket_ids:
+                sub_ais_query = text("""
+                    SELECT sub_ticket_id, runbook_resolution, rag_resolution, decision_reason, confidence_score, source_used
+                    FROM sub_ticket_ai_analysis
+                    WHERE sub_ticket_id IN :ids
+                """)
+                sub_ais = self.db.execute(sub_ais_query, {"ids": tuple(sub_ticket_ids)}).mappings().all()
+
+            # Query comments for main ticket
+            main_comments_query = text("""
+                SELECT comment_text, commented_by, created_at
+                FROM comments
+                WHERE ticket_id = :ticket_id
+                ORDER BY created_at ASC
+            """)
+            main_comments = self.db.execute(main_comments_query, {"ticket_id": record.ticket_id}).mappings().all()
+
+            # Query comments for sub-tickets
+            sub_comments = []
+            if sub_ticket_ids:
+                sub_comments_query = text("""
+                    SELECT comment_text, commented_by, created_at
+                    FROM sub_ticket_comments
+                    WHERE sub_ticket_id IN :ids
+                    ORDER BY created_at ASC
+                """)
+                sub_comments = self.db.execute(sub_comments_query, {"ids": tuple(sub_ticket_ids)}).mappings().all()
+
+            # Resolve user classifications from user IDs involved
+            comment_author_strs = {c["commented_by"] for c in main_comments if c["commented_by"]} | \
+                                  {sc["commented_by"] for sc in sub_comments if sc["commented_by"]}
+            
+            comment_author_uuids = []
+            for author_str in comment_author_strs:
+                try:
+                    comment_author_uuids.append(uuid.UUID(author_str))
+                except ValueError:
+                    pass
+
+            user_uuids = set(comment_author_uuids)
+            if main_ticket["created_by"]:
+                user_uuids.add(main_ticket["created_by"])
+            if main_ticket["assigned_to"]:
+                user_uuids.add(main_ticket["assigned_to"])
+            for st in sub_tickets:
+                if st["created_by"]:
+                    user_uuids.add(st["created_by"])
+                if st["assigned_to"]:
+                    user_uuids.add(st["assigned_to"])
+
+            user_type_map = {}
+            if user_uuids:
+                users_query = text("""
+                    SELECT id, user_type, role, name
+                    FROM users
+                    WHERE id IN :ids
+                """)
+                users_rows = self.db.execute(users_query, {"ids": tuple(user_uuids)}).mappings().all()
+                user_type_map = {row["id"]: row for row in users_rows}
+
+            # Function to classify author
+            def classify_author(author_str: str | None) -> str:
+                if not author_str:
+                    return "UNKNOWN"
+                try:
+                    author_uuid = uuid.UUID(author_str)
+                    user_row = user_type_map.get(author_uuid)
+                    if user_row:
+                        u_type = user_row["user_type"]
+                        if u_type == "CUSTOMER":
+                            return "CUSTOMER"
+                        elif u_type == "STAFF":
+                            return "AGENT"
+                    return "UNKNOWN"
+                except ValueError:
+                    return "UNKNOWN"
+
+            # Dynamic repeat count calculation from actual data
+            repeat_count = len(sub_tickets)
+
+            # Trace logs of the issue chain context for complete visibility
+            issue_chain_trace = {
+                "main_ticket": {
+                    "id": main_ticket["id"],
+                    "title": main_ticket["title"],
+                    "description": main_ticket["description"],
+                    "resolution": main_ticket["resolution"],
+                    "status": main_ticket["status"],
+                    "created_by": main_ticket["created_by"],
+                    "assigned_to": main_ticket["assigned_to"],
+                },
+                "sub_tickets": [
+                    {
+                        "id": st["id"],
+                        "title": st["title"],
+                        "description": st["description"],
+                        "resolution": st["resolution"],
+                        "status": st["status"],
+                        "created_by": st["created_by"],
+                        "assigned_to": st["assigned_to"],
+                    } for st in sub_tickets
+                ],
+                "all_comments": []
+            }
+
+            customer_comment_texts = []
+            agent_comment_texts = []
+
+            for c in main_comments:
+                author_class = classify_author(c["commented_by"])
+                issue_chain_trace["all_comments"].append({
+                    "text": c["comment_text"],
+                    "author": c["commented_by"],
+                    "category": author_class,
+                    "created_at": str(c["created_at"]),
+                    "source": "main_ticket"
+                })
+                if author_class == "CUSTOMER":
+                    customer_comment_texts.append(c["comment_text"])
+                elif author_class == "AGENT":
+                    agent_comment_texts.append(c["comment_text"])
+
+            for sc in sub_comments:
+                author_class = classify_author(sc["commented_by"])
+                issue_chain_trace["all_comments"].append({
+                    "text": sc["comment_text"],
+                    "author": sc["commented_by"],
+                    "category": author_class,
+                    "created_at": str(sc["created_at"]),
+                    "source": "sub_ticket"
+                })
+                if author_class == "CUSTOMER":
+                    customer_comment_texts.append(sc["comment_text"])
+                elif author_class == "AGENT":
+                    agent_comment_texts.append(sc["comment_text"])
+
+            logger.info("Retrieved issue-chain context trace for ticket_id=%s: %s", record.ticket_id, issue_chain_trace)
 
             # Resolve customer_id if not present in captured event
             customer_id = record.customer_id
             if customer_id is None:
-                customer_id = created_by
-                if customer_id is None and customer_name:
+                customer_id = main_ticket["created_by"]
+                if customer_id is None and main_ticket["customer_name"]:
                     logger.info(
                         "Resolving customer_id via customer_profiles for company_name=%s",
-                        customer_name,
+                        main_ticket["customer_name"],
                     )
                     profile_query = text("""
                         SELECT user_id FROM customer_profiles
@@ -161,23 +306,39 @@ class EnrichmentOrchestrator:
                     """)
                     profile_row = self.db.execute(
                         profile_query,
-                        {"company_name": customer_name.strip().lower()},
+                        {"company_name": main_ticket["customer_name"].strip().lower()},
                     ).fetchone()
                     if profile_row:
                         customer_id = profile_row[0]
                         logger.info("Resolved customer_id=%s", customer_id)
 
             # Customer's text representation
-            customer_text = " ".join(filter(None, [title, description]))
+            customer_components = [main_ticket["title"], main_ticket["description"]]
+            for st in sub_tickets:
+                customer_components.extend([st["title"], st["description"]])
+            customer_components.extend(customer_comment_texts)
+            customer_text = " ".join(filter(None, customer_components))
 
-            # Resolution text resolution hierarchy
-            resolution_text = t_res
-            if not resolution_text or not resolution_text.strip():
-                # Fallbacks from AI analysis
-                resolution_text = next(
-                    (r for r in (r_res, rag_res, dec_reason) if r and r.strip()),
-                    None,
-                )
+            # Resolution text hierarchy
+            agent_components = []
+            if main_ticket["resolution"]:
+                agent_components.append(main_ticket["resolution"])
+            for st in sub_tickets:
+                if st["resolution"]:
+                    agent_components.append(st["resolution"])
+
+            if main_ai:
+                for r in [main_ai["runbook_resolution"], main_ai["rag_resolution"], main_ai["decision_reason"]]:
+                    if r and r.strip():
+                        agent_components.append(r)
+
+            for sa in sub_ais:
+                for r in [sa["runbook_resolution"], sa["rag_resolution"], sa["decision_reason"]]:
+                    if r and r.strip():
+                        agent_components.append(r)
+
+            agent_components.extend(agent_comment_texts)
+            resolution_text = " ".join(filter(None, agent_components))
 
             # Step 3: Run Summarization Engine
             logger.info("Generating query and response summaries")
@@ -198,8 +359,101 @@ class EnrichmentOrchestrator:
 
             # Step 6: Run Escalation Risk Scorer
             logger.info("Calculating escalation risk and classification band")
+            
+            # Fetch risk scorer integration signals
+            risk_signals = {
+                "escalation_source": main_ai["source_used"] if main_ai else None,
+                "recommendation_source": None,
+                "approval_action": None,
+                "ai_confidences": [],
+                "ticket_status": main_ticket["status"],
+                "latest_activity_at": None,
+            }
+
+            if main_ai and main_ai["confidence_score"] is not None:
+                risk_signals["ai_confidences"].append(float(main_ai["confidence_score"]))
+            for sa in sub_ais:
+                if sa["confidence_score"] is not None:
+                    risk_signals["ai_confidences"].append(float(sa["confidence_score"]))
+
+            # Attempt to query recommendations table (non-existent, handles fallback cleanly)
+            try:
+                recommendation_row = self.db.execute(
+                    text("""
+                        SELECT recommendation_source
+                        FROM recommendations
+                        WHERE ticket_id = :ticket_id
+                        ORDER BY created_at DESC NULLS LAST
+                        LIMIT 1
+                    """),
+                    {"ticket_id": record.ticket_id},
+                ).mappings().first()
+                if recommendation_row:
+                    risk_signals["recommendation_source"] = recommendation_row["recommendation_source"]
+            except Exception:
+                logger.warning("recommendations table is unavailable (expected database architecture detail)")
+
+            try:
+                approval_row = self.db.execute(
+                    text("""
+                        SELECT action
+                        FROM approval_history
+                        WHERE ticket_id = :ticket_id
+                        ORDER BY created_at DESC NULLS LAST
+                        LIMIT 1
+                    """),
+                    {"ticket_id": record.ticket_id},
+                ).mappings().first()
+                if approval_row:
+                    risk_signals["approval_action"] = approval_row["action"]
+            except Exception:
+                logger.warning("Unable to load approval history for ticket_id=%s", record.ticket_id)
+
+            # Calculate latest_activity_at dynamically across the entire issue chain
+            timestamps = []
+            if main_ticket["updated_at"]:
+                timestamps.append(main_ticket["updated_at"])
+            elif main_ticket["created_at"]:
+                timestamps.append(main_ticket["created_at"])
+            
+            for st in sub_tickets:
+                if st["updated_at"]:
+                    timestamps.append(st["updated_at"])
+                elif st["created_at"]:
+                    timestamps.append(st["created_at"])
+
+            for c in main_comments:
+                if c["created_at"]:
+                    timestamps.append(c["created_at"])
+
+            for sc in sub_comments:
+                if sc["created_at"]:
+                    timestamps.append(sc["created_at"])
+
+            try:
+                approval_rows = self.db.execute(
+                    text("SELECT created_at FROM approval_history WHERE ticket_id = :ticket_id"),
+                    {"ticket_id": record.ticket_id}
+                ).mappings().all()
+                for ar in approval_rows:
+                    if ar["created_at"]:
+                        timestamps.append(ar["created_at"])
+            except Exception:
+                pass
+
+            if timestamps:
+                risk_signals["latest_activity_at"] = max(timestamps)
+
             ticket_history = self.repository.get_ticket_history(record.ticket_id)
-            risk_result = compute_escalation_risk(ticket_history)
+            risk_result = compute_escalation_risk(
+                ticket_history,
+                escalation_source=risk_signals["escalation_source"],
+                recommendation_source=risk_signals["recommendation_source"],
+                approval_action=risk_signals["approval_action"],
+                ai_confidences=risk_signals["ai_confidences"],
+                ticket_status=risk_signals["ticket_status"],
+                latest_activity_at=risk_signals["latest_activity_at"],
+            )
             risk_score = risk_result["escalation_risk_score"]
             risk_band = risk_result["escalation_risk_band"]
             confidence_decay_score = risk_result["confidence_decay_score"]
@@ -207,6 +461,7 @@ class EnrichmentOrchestrator:
             risk_multiplier = risk_result["risk_multiplier"]
             risk_reason = risk_result["risk_reason"]
             risk_processed = risk_result["risk_processed"]
+
 
             # Step 7: Generate Embedding and Upsert to Qdrant
             qdrant_vector_id = None
@@ -297,6 +552,7 @@ class EnrichmentOrchestrator:
                 "risk_multiplier": risk_multiplier,
                 "risk_reason": risk_reason,
                 "risk_processed": risk_processed,
+                "repeat_count": repeat_count,
                 "qdrant_vector_id": qdrant_vector_id,
                 "model_version": self.llm.model_version,
             }
