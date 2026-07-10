@@ -1,5 +1,5 @@
 """
-backend/models/ticket_rollup.py
+models/ticket_rollup.py
 SQLAlchemy database model representing ticket rollup summaries, aggregating daily/weekly historical indicators.
 """
 
@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from sqlalchemy import Column, DateTime, Float, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
 
-from backend.db.base_class import Base
+from db.base_class import Base
 
 
 class TicketRollup(Base):

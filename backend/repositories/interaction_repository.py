@@ -1,5 +1,5 @@
 """
-backend/repositories/interaction_repository.py
+repositories/interaction_repository.py
 Abstractions and database query wrappers for CRUD operations on interaction analytics models.
 """
 
@@ -10,8 +10,8 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from backend.core.logging import setup_logger
-from backend.models.operational_analysis import OperationalAnalysis
+from core.logging import setup_logger
+from models.operational_analysis import OperationalAnalysis
 
 logger = setup_logger(__name__)
 

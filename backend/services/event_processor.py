@@ -1,5 +1,5 @@
 """
-backend/services/event_processor.py
+services/event_processor.py
 Event Ingestion Processor. Orchestrates the flow of incoming interaction events,
 triggering database persistence, analysis, and metadata enrichment pipelines.
 """
@@ -10,10 +10,10 @@ from typing import Any, Optional
 from fastapi import BackgroundTasks
 from sqlalchemy.orm import Session
 
-from backend.core.logging import setup_logger
-from backend.models.operational_analysis import OperationalAnalysis
-from backend.repositories.interaction_repository import InteractionRepository
-from backend.schemas.event import EventCaptureRequest, EventCaptureResponse
+from core.logging import setup_logger
+from models.operational_analysis import OperationalAnalysis
+from repositories.interaction_repository import InteractionRepository
+from schemas.event import EventCaptureRequest, EventCaptureResponse
 
 logger = setup_logger(__name__)
 
@@ -21,8 +21,8 @@ logger = setup_logger(__name__)
 def run_enrichment_task(operational_analysis_id_str: str) -> None:
     """Background task to run enrichment and downstream clustering for a record."""
     import uuid
-    from backend.db.session import SessionLocal
-    from backend.services.enrichment_orchestrator import EnrichmentOrchestrator
+    from db.session import SessionLocal
+    from services.enrichment_orchestrator import EnrichmentOrchestrator
 
     logger.info("Starting background enrichment task for ID: %s", operational_analysis_id_str)
     db = SessionLocal()

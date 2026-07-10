@@ -1,5 +1,5 @@
 """
-backend/schemas/event.py
+schemas/event.py
 Pydantic data serialization schemas for incoming interaction events.
 """
 
@@ -10,7 +10,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field, field_validator
 
-from backend.core.constants import (
+from core.constants import (
     ESCALATION_RISK_SCORE_MAX,
     ESCALATION_RISK_SCORE_MIN,
     REPEAT_COUNT_MIN,

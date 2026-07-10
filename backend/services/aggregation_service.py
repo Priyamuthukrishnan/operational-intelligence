@@ -1,5 +1,5 @@
 """
-backend/services/aggregation_service.py
+services/aggregation_service.py
 Aggregation Service. Periodically calculates daily, weekly, and monthly
 rollups of key metrics and updates the ticket_rollups table.
 """
@@ -10,10 +10,10 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
-from backend.core.logging import setup_logger
-from backend.models.operational_analysis import OperationalAnalysis
-from backend.models.ticket_rollup import TicketRollup
-from backend.utils.date_helpers import get_daily_key, get_weekly_key, get_monthly_key
+from core.logging import setup_logger
+from models.operational_analysis import OperationalAnalysis
+from models.ticket_rollup import TicketRollup
+from utils.date_helpers import get_daily_key, get_weekly_key, get_monthly_key
 
 logger = setup_logger(__name__)
 

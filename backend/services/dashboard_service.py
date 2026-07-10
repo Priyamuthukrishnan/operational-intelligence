@@ -1,5 +1,5 @@
 """
-backend/services/dashboard_service.py
+services/dashboard_service.py
 Dashboard Aggregator Service. Fetches, caches, and shapes metric records
 to supply clean structures to dashboard router endpoints.
 """
@@ -9,9 +9,9 @@ from __future__ import annotations
 import uuid
 from sqlalchemy.orm import Session
 
-from backend.repositories.dashboard_repository import DashboardRepository
-from backend.repositories.customer_health_repository import CustomerHealthRepository
-from backend.schemas.dashboard import (
+from repositories.dashboard_repository import DashboardRepository
+from repositories.customer_health_repository import CustomerHealthRepository
+from schemas.dashboard import (
     OperationalDashboardResponse,
     RecentEscalation,
     CategoryMetric,

@@ -1,5 +1,5 @@
 """
-backend/services/enrichment_orchestrator.py
+services/enrichment_orchestrator.py
 Enrichment Orchestrator. Coordinates the complete enrichment flow for a
 single OperationalAnalysis record:
   1. Retrieve raw text data from tickets/ai_analysis.
@@ -19,16 +19,16 @@ from typing import Any, Optional
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from backend.core.logging import setup_logger
-from backend.repositories.interaction_repository import InteractionRepository
-from backend.intelligence.llm_client import LLMClient
-from backend.intelligence.summarizer import SummarizationEngine
-from backend.intelligence.sentiment import SentimentEngine
-from backend.intelligence.risk_scorer import compute as compute_escalation_risk
-from backend.intelligence.root_cause import RootCauseEngine
-from backend.embeddings.generator import EmbeddingGenerator
-from backend.services.qdrant_service import QdrantService
-from backend.services.embedding_client import EmbeddingClient
+from core.logging import setup_logger
+from repositories.interaction_repository import InteractionRepository
+from intelligence.llm_client import LLMClient
+from intelligence.summarizer import SummarizationEngine
+from intelligence.sentiment import SentimentEngine
+from intelligence.risk_scorer import compute as compute_escalation_risk
+from intelligence.root_cause import RootCauseEngine
+from embeddings.generator import EmbeddingGenerator
+from services.qdrant_service import QdrantService
+from services.embedding_client import EmbeddingClient
 
 logger = setup_logger(__name__)
 
@@ -318,7 +318,7 @@ class EnrichmentOrchestrator:
                         "Triggering downstream clustering for customer_id=%s",
                         customer_id,
                     )
-                    from backend.services.customer_clustering_service import (
+                    from services.customer_clustering_service import (
                         CustomerClusteringService,
                     )
 
@@ -333,7 +333,7 @@ class EnrichmentOrchestrator:
                         "Triggering customer health evaluation for customer_id=%s",
                         customer_id,
                     )
-                    from backend.services.customer_health_service import (
+                    from services.customer_health_service import (
                         CustomerHealthService,
                     )
 

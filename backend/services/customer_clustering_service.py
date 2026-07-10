@@ -1,5 +1,5 @@
 """
-backend/services/customer_clustering_service.py
+services/customer_clustering_service.py
 Customer Clustering Service. Orchestrates interaction retrieval, feature
 preparation, repeat-pattern analysis, and Qdrant-powered similarity search.
 
@@ -29,11 +29,11 @@ from typing import Optional
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from backend.core.config import get_settings
-from backend.core.logging import setup_logger
-from backend.models.operational_analysis import OperationalAnalysis
-from backend.repositories.cluster_repository import ClusterRepository
-from backend.schemas.clustering import (
+from core.config import get_settings
+from core.logging import setup_logger
+from models.operational_analysis import OperationalAnalysis
+from repositories.cluster_repository import ClusterRepository
+from schemas.clustering import (
     ClusteringFeaturePlaceholder,
     CustomerClusteringResponse,
     CustomerClusterSummary,
@@ -116,7 +116,7 @@ class CustomerClusteringService:
         # ── Initialise Qdrant service (optional) ─────────────────────────
         self._qdrant: Optional[object] = None
         try:
-            from backend.services.qdrant_service import QdrantService
+            from services.qdrant_service import QdrantService
 
             self._qdrant = QdrantService()
             logger.info("Qdrant service initialised for clustering")
@@ -364,7 +364,7 @@ class CustomerClusteringService:
             qdrant_data = qdrant_lookup.get(norm_db_vid)
             if qdrant_data is None:
                 # Try coerced ID lookup
-                from backend.services.qdrant_service import QdrantService
+                from services.qdrant_service import QdrantService
 
                 coerced = str(
                     QdrantService._coerce_point_id(

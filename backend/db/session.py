@@ -1,12 +1,12 @@
 """
-backend/db/session.py
+db/session.py
 Database connection configuration and session makers (connecting to PostgreSQL/Neon).
 """
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from backend.core.config import get_settings
+from core.config import get_settings
 
 settings = get_settings()
 

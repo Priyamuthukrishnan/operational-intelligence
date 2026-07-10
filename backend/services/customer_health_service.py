@@ -1,5 +1,5 @@
 """
-backend/services/customer_health_service.py
+services/customer_health_service.py
 Customer Health Service. Gathers aggregated customer interaction signals,
 computes their composite health score, and updates the database.
 """
@@ -11,11 +11,11 @@ from typing import Optional
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from backend.core.logging import setup_logger
-from backend.models.operational_analysis import OperationalAnalysis
-from backend.repositories.cluster_repository import ClusterRepository
-from backend.repositories.customer_health_repository import CustomerHealthRepository
-from backend.intelligence.customer_health import CustomerHealthScorer
+from core.logging import setup_logger
+from models.operational_analysis import OperationalAnalysis
+from repositories.cluster_repository import ClusterRepository
+from repositories.customer_health_repository import CustomerHealthRepository
+from intelligence.customer_health import CustomerHealthScorer
 
 logger = setup_logger(__name__)
 
@@ -53,7 +53,7 @@ class CustomerHealthService:
         # We can construct repeat issue detail using the customer clustering service
         # or calculate it directly. Since customer clustering persists repeat patterns,
         # we can fetch the ratio of repeat interactions to total interactions.
-        from backend.services.customer_clustering_service import CustomerClusteringService
+        from services.customer_clustering_service import CustomerClusteringService
         clustering_service = CustomerClusteringService(self._db)
         clustering_response = clustering_service.group_customer_issues(customer_id)
 

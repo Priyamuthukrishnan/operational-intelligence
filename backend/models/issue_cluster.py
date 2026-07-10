@@ -1,12 +1,12 @@
 """
-backend/models/issue_cluster.py
+models/issue_cluster.py
 SQLAlchemy database model representing ML-generated issue/topic clusters and category centroid references.
 """
 
 import uuid
 from sqlalchemy import Column, Integer, Text, DateTime, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
-from backend.db.base_class import Base
+from db.base_class import Base
 
 class IssueCluster(Base):
     """SQLAlchemy model representing ML-generated issue/topic clusters.

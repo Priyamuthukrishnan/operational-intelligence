@@ -8,11 +8,11 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from backend.core.logging import setup_logger
-from backend.db.session import SessionLocal
-from backend.intelligence.risk_scorer import compute
-from backend.models.operational_analysis import OperationalAnalysis
-from backend.repositories.interaction_repository import InteractionRepository
+from core.logging import setup_logger
+from db.session import SessionLocal
+from intelligence.risk_scorer import compute
+from models.operational_analysis import OperationalAnalysis
+from repositories.interaction_repository import InteractionRepository
 
 logger = setup_logger(__name__)
 

@@ -1,5 +1,5 @@
 """
-backend/intelligence/summarizer.py
+intelligence/summarizer.py
 Summarization Engine. Generates concise summaries of customer queries
 and resolution actions using LLM inference with offline fallback.
 """
@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from typing import Optional
 
-from backend.core.logging import setup_logger
-from backend.intelligence.llm_client import LLMClient
+from core.logging import setup_logger
+from intelligence.llm_client import LLMClient
 
 logger = setup_logger(__name__)
 

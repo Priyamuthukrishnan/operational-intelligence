@@ -1,5 +1,5 @@
 """
-backend/repositories/customer_health_repository.py
+repositories/customer_health_repository.py
 Abstractions and database query wrappers for CRUD operations on CustomerHealth records.
 """
 
@@ -9,8 +9,8 @@ import uuid
 from typing import Optional
 from sqlalchemy.orm import Session
 
-from backend.core.logging import setup_logger
-from backend.models.customer_health import CustomerHealth
+from core.logging import setup_logger
+from models.customer_health import CustomerHealth
 
 logger = setup_logger(__name__)
 

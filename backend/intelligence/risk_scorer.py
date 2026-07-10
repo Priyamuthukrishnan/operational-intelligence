@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from backend.models.operational_analysis import OperationalAnalysis
+from models.operational_analysis import OperationalAnalysis
 
 
 def _norm(value: Any) -> str:

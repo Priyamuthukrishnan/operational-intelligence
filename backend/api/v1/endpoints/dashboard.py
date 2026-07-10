@@ -1,5 +1,5 @@
 """
-backend/api/v1/endpoints/dashboard.py
+api/v1/endpoints/dashboard.py
 REST API endpoints for executive summary metrics and operational dashboards data.
 """
 
@@ -10,11 +10,11 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from backend.api.deps import get_db
-from backend.core.logging import setup_logger
-from backend.services.dashboard_service import DashboardService
-from backend.services.aggregation_service import AggregationService
-from backend.schemas.dashboard import (
+from api.deps import get_db
+from core.logging import setup_logger
+from services.dashboard_service import DashboardService
+from services.aggregation_service import AggregationService
+from schemas.dashboard import (
     OperationalDashboardResponse,
     ExecutiveDashboardResponse,
     CustomerDashboardResponse,

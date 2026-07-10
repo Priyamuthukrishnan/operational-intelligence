@@ -1,5 +1,5 @@
 """
-backend/services/embedding_client.py
+services/embedding_client.py
 HTTP client for the external embedding service API.
 
 The embedding service is maintained separately and exposes two endpoints:
@@ -17,8 +17,8 @@ from typing import Any, Optional
 
 import httpx
 
-from backend.core.config import get_settings
-from backend.core.logging import setup_logger
+from core.config import get_settings
+from core.logging import setup_logger
 
 logger = setup_logger(__name__)
 

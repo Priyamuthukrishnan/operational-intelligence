@@ -1,5 +1,5 @@
 """
-backend/api/v1/endpoints/events.py
+api/v1/endpoints/events.py
 REST API endpoint definitions for receiving and processing interaction events.
 """
 
@@ -8,10 +8,10 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.orm import Session
 
-from backend.api.deps import get_db
-from backend.core.logging import setup_logger
-from backend.schemas.event import EventCaptureRequest, EventCaptureResponse
-from backend.services.event_processor import EventProcessor
+from api.deps import get_db
+from core.logging import setup_logger
+from schemas.event import EventCaptureRequest, EventCaptureResponse
+from services.event_processor import EventProcessor
 
 logger = setup_logger(__name__)
 

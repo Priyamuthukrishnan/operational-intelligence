@@ -1,5 +1,5 @@
 """
-backend/api/deps.py
+api/deps.py
 Dependency injection providers (such as DB session generators and external client helpers).
 """
 
@@ -7,7 +7,7 @@ from collections.abc import Generator
 
 from sqlalchemy.orm import Session
 
-from backend.db.session import SessionLocal
+from db.session import SessionLocal
 
 
 def get_db() -> Generator[Session, None, None]:

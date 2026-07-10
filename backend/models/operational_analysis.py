@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
-from backend.db.base_class import Base
+from db.base_class import Base
 
 
 class OperationalAnalysis(Base):

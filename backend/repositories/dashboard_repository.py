@@ -1,5 +1,5 @@
 """
-backend/repositories/dashboard_repository.py
+repositories/dashboard_repository.py
 Abstractions and database query wrappers for compiling aggregated statistics from ticket rollups and customer health models.
 """
 
@@ -10,10 +10,10 @@ from typing import Any, Optional
 from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
 
-from backend.models.operational_analysis import OperationalAnalysis
-from backend.models.issue_cluster import IssueCluster
-from backend.models.customer_health import CustomerHealth
-from backend.models.ticket_rollup import TicketRollup
+from models.operational_analysis import OperationalAnalysis
+from models.issue_cluster import IssueCluster
+from models.customer_health import CustomerHealth
+from models.ticket_rollup import TicketRollup
 
 
 class DashboardRepository:

@@ -1,5 +1,5 @@
 """
-backend/repositories/cluster_repository.py
+repositories/cluster_repository.py
 Abstractions and database query wrappers for CRUD operations on issue clusters.
 """
 
@@ -12,9 +12,9 @@ from typing import Optional
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from backend.core.logging import setup_logger
-from backend.models.operational_analysis import OperationalAnalysis
-from backend.models.issue_cluster import IssueCluster
+from core.logging import setup_logger
+from models.operational_analysis import OperationalAnalysis
+from models.issue_cluster import IssueCluster
 
 logger = setup_logger(__name__)
 

@@ -1,5 +1,5 @@
 """
-backend/models/customer_health.py
+models/customer_health.py
 SQLAlchemy database model representing customer health scores, trends, volumes, and metrics breakdown.
 """
 
@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from sqlalchemy import Column, DateTime, Float, Integer
 from sqlalchemy.dialects.postgresql import UUID
 
-from backend.db.base_class import Base
+from db.base_class import Base
 
 
 class CustomerHealth(Base):

@@ -1,5 +1,5 @@
 """
-backend/intelligence/sentiment.py
+intelligence/sentiment.py
 Sentiment Engine. Analyses the emotional tone of customer interactions
 and returns a classification label with a calibrated score.
 """
@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from typing import Optional
 
-from backend.core.logging import setup_logger
-from backend.intelligence.llm_client import LLMClient
+from core.logging import setup_logger
+from intelligence.llm_client import LLMClient
 
 logger = setup_logger(__name__)
 

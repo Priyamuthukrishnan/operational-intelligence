@@ -1,5 +1,5 @@
 """
-backend/intelligence/customer_health.py
+intelligence/customer_health.py
 Customer Health Scorer. Computes customer health scores based on sentiment,
 escalation risk, repeat issue patterns, and resolution rates.
 """
@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from backend.core.logging import setup_logger
+from core.logging import setup_logger
 
 logger = setup_logger(__name__)
 

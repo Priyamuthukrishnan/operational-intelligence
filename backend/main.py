@@ -1,5 +1,5 @@
 """
-backend/main.py
+main.py
 FastAPI application main entrypoint. Handles server startup, lifecycle events,
 middleware configurations, and routing integrations.
 """
@@ -10,9 +10,9 @@ from collections.abc import AsyncGenerator
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.api.v1.api import api_router
-from backend.core.config import get_settings
-from backend.core.logging import setup_logger
+from api.v1.api import api_router
+from core.config import get_settings
+from core.logging import setup_logger
 
 logger = setup_logger(__name__)
 settings = get_settings()

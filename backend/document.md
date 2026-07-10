@@ -1,5 +1,16 @@
 # Operational Intelligence API Reference Documentation
 
+## Backend startup
+
+```powershell
+cd backend
+pip install -r requirements.txt
+Copy-Item .env.example .env
+uvicorn main:app --reload
+```
+
+On macOS or Linux, use `cp .env.example .env` instead of `Copy-Item`.
+
 This document describes the REST API endpoints, schemas, request parameters, and response structures for the Operational Intelligence platform's analytics and enrichment layer.
 
 ---

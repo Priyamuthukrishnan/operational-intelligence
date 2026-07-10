@@ -1,5 +1,5 @@
 """
-backend/api/v1/endpoints/intelligence.py
+api/v1/endpoints/intelligence.py
 REST API endpoints for querying summary, sentiment, escalation risk, root cause, and health indicators.
 """
 
@@ -10,9 +10,9 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from backend.api.deps import get_db
-from backend.core.logging import setup_logger
-from backend.repositories.interaction_repository import InteractionRepository
+from api.deps import get_db
+from core.logging import setup_logger
+from repositories.interaction_repository import InteractionRepository
 
 logger = setup_logger(__name__)
 

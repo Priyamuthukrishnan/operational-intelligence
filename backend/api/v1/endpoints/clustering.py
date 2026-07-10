@@ -1,5 +1,5 @@
 """
-backend/api/v1/endpoints/clustering.py
+api/v1/endpoints/clustering.py
 REST API endpoints for customer groupings, issue clusters, and repeat issue detections.
 """
 
@@ -10,10 +10,10 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from backend.api.deps import get_db
-from backend.core.logging import setup_logger
-from backend.schemas.clustering import CustomerClusteringResponse
-from backend.services.customer_clustering_service import CustomerClusteringService
+from api.deps import get_db
+from core.logging import setup_logger
+from schemas.clustering import CustomerClusteringResponse
+from services.customer_clustering_service import CustomerClusteringService
 
 logger = setup_logger(__name__)
 

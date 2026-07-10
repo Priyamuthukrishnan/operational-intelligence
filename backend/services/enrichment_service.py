@@ -3,8 +3,8 @@
 Enrichment runner — SUMMARIZATION + SENTIMENT.
 
 ⚠️ Location note: this is a SCRIPT, not a model. Keep it at
-backend/scripts/run_enrichment.py. Do NOT put it in
-backend/models/operational_analysis.py — that file should stay the
+scripts/run_enrichment.py. Do NOT put it in
+models/operational_analysis.py — that file should stay the
 SQLAlchemy table definition only.
 
 Reads unenriched interactions from ai_analysis and writes into

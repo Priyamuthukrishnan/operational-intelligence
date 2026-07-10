@@ -1,5 +1,5 @@
 """
-backend/embeddings/generator.py
+embeddings/generator.py
 Vector Embedding Generator. Calls the Mistral embedding API to produce
 dense vector representations of interaction text for Qdrant storage and
 similarity search.
@@ -12,8 +12,8 @@ from __future__ import annotations
 
 from typing import Optional
 
-from backend.core.config import get_settings
-from backend.core.logging import setup_logger
+from core.config import get_settings
+from core.logging import setup_logger
 
 logger = setup_logger(__name__)
 
