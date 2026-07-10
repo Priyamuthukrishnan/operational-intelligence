@@ -36,7 +36,10 @@ class EmbeddingGenerator:
 
         if self._api_key:
             try:
-                from mistralai import Mistral
+                try:
+                    from mistralai import Mistral
+                except ImportError:
+                    from mistralai.client import Mistral
 
                 self._client = Mistral(api_key=self._api_key)
                 logger.info(
