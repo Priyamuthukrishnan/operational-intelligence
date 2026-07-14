@@ -14,6 +14,17 @@ from models.operational_analysis import OperationalAnalysis
 from models.issue_cluster import IssueCluster
 from models.customer_health import CustomerHealth
 from models.ticket_rollup import TicketRollup
+from sqlalchemy import Table, Column, String
+from sqlalchemy.dialects.postgresql import UUID
+from db.base_class import Base
+
+users_table = Table(
+    "users",
+    Base.metadata,
+    Column("id", UUID(as_uuid=True), primary_key=True),
+    Column("name", String(255)),
+    extend_existing=True,
+)
 
 
 class DashboardRepository:
@@ -164,10 +175,13 @@ class DashboardRepository:
             .all()
         )[::-1]  # Return in chronological order (oldest to newest)
 
-    def get_at_risk_customers(self, limit: int = 5) -> list[CustomerHealth]:
+    def get_at_risk_customers(
+        self, limit: int = 5
+    ) -> list[tuple[CustomerHealth, Optional[str]]]:
         """Fetch customer accounts sorted by lowest health score."""
         return (
-            self.db.query(CustomerHealth)
+            self.db.query(CustomerHealth, users_table.c.name.label("customer_name"))
+            .outerjoin(users_table, users_table.c.id == CustomerHealth.customer_id)
             .order_by(CustomerHealth.health_score.asc())
             .limit(limit)
             .all()

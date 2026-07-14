@@ -100,6 +100,10 @@ class AtRiskCustomer(BaseModel):
     """Summary of a customer account with low health or high escalation risk."""
 
     customer_id: uuid.UUID = Field(..., description="Identifier of the customer")
+    customer_name: Optional[str] = Field(
+        default=None,
+        description="Human-readable customer name"
+    )
     health_score: float = Field(..., description="Current customer health score (0-100)")
     sentiment_average: Optional[float] = Field(None, description="Average sentiment score")
     escalation_risk_average: Optional[float] = Field(None, description="Average escalation risk")

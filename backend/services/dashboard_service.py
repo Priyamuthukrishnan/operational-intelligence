@@ -9,8 +9,11 @@ from __future__ import annotations
 import uuid
 from sqlalchemy.orm import Session
 
+from core.logging import setup_logger
 from repositories.dashboard_repository import DashboardRepository
 from repositories.customer_health_repository import CustomerHealthRepository
+
+logger = setup_logger(__name__)
 from schemas.dashboard import (
     OperationalDashboardResponse,
     RecentEscalation,
@@ -124,16 +127,23 @@ class DashboardService:
             for t in trends
         ]
 
-        at_risk_customers = [
-            AtRiskCustomer(
-                customer_id=c.customer_id,
-                health_score=c.health_score,
-                sentiment_average=c.sentiment_average,
-                escalation_risk_average=c.escalation_risk_average,
-                interaction_count=c.interaction_count,
+        at_risk_customers = []
+        for c, customer_name in at_risk_list:
+            if customer_name is None:
+                logger.warning(
+                    "Missing user relationship for customer_id=%s in customer_health",
+                    c.customer_id,
+                )
+            at_risk_customers.append(
+                AtRiskCustomer(
+                    customer_id=c.customer_id,
+                    customer_name=customer_name,
+                    health_score=c.health_score,
+                    sentiment_average=c.sentiment_average,
+                    escalation_risk_average=c.escalation_risk_average,
+                    interaction_count=c.interaction_count,
+                )
             )
-            for c in at_risk_list
-        ]
 
         return ExecutiveDashboardResponse(
             overall_health_index=health_stats["overall_health_index"],
