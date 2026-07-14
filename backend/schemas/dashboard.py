@@ -26,7 +26,15 @@ class RecentEscalation(BaseModel):
 
     interaction_id: uuid.UUID = Field(..., description="ID of the interaction record")
     ticket_id: uuid.UUID = Field(..., description="Source ticket identifier")
+    ticket_key: Optional[str] = Field(
+        default=None,
+        description="Human-readable ticket reference"
+    )
     customer_id: Optional[uuid.UUID] = Field(None, description="Customer identifier")
+    customer_name: Optional[str] = Field(
+        default=None,
+        description="Human-readable customer name"
+    )
     sentiment_label: Optional[str] = Field(None, description="Sentiment classification")
     escalation_risk_score: float = Field(..., description="Escalation risk probability")
     escalation_risk_band: str = Field(..., description="Risk band: high or critical")

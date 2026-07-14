@@ -54,14 +54,16 @@ class DashboardService:
             RecentEscalation(
                 interaction_id=e.id,
                 ticket_id=e.ticket_id,
+                ticket_key=ticket_key,
                 customer_id=e.customer_id,
+                customer_name=customer_name,
                 sentiment_label=e.sentiment_label,
                 escalation_risk_score=e.escalation_risk_score or 0.0,
                 escalation_risk_band=e.escalation_risk_band or "high",
                 query_summary=e.query_summary,
                 captured_at=e.captured_at,
             )
-            for e in escalations
+            for e, ticket_key, customer_name in escalations
         ]
 
         top_categories = [

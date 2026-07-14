@@ -26,6 +26,15 @@ users_table = Table(
     extend_existing=True,
 )
 
+tickets_table = Table(
+    "tickets",
+    Base.metadata,
+    Column("id", UUID(as_uuid=True), primary_key=True),
+    Column("ticket_key", String(100)),
+    Column("created_by", UUID(as_uuid=True)),
+    extend_existing=True,
+)
+
 
 class DashboardRepository:
     """Access layer for dashboard analytics and aggregated database queries."""
@@ -73,10 +82,22 @@ class DashboardRepository:
             "critical_escalations_count": critical_count,
         }
 
-    def get_recent_escalations(self, limit: int = 10) -> list[OperationalAnalysis]:
+    def get_recent_escalations(
+        self, limit: int = 10
+    ) -> list[tuple[OperationalAnalysis, Optional[str], Optional[str]]]:
         """Retrieve recent high-risk or critical escalation records."""
+        u_oa = users_table.alias("u_oa")
+        u_t = users_table.alias("u_t")
+        customer_name_expr = func.coalesce(u_oa.c.name, u_t.c.name).label("customer_name")
         return (
-            self.db.query(OperationalAnalysis)
+            self.db.query(
+                OperationalAnalysis,
+                tickets_table.c.ticket_key.label("ticket_key"),
+                customer_name_expr
+            )
+            .outerjoin(tickets_table, tickets_table.c.id == OperationalAnalysis.ticket_id)
+            .outerjoin(u_oa, u_oa.c.id == OperationalAnalysis.customer_id)
+            .outerjoin(u_t, u_t.c.id == tickets_table.c.created_by)
             .filter(
                 OperationalAnalysis.escalation_risk_band.in_(["critical", "high"])
             )
