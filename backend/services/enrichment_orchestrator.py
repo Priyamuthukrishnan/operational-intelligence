@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import uuid
 from typing import Any, Optional
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 from sqlalchemy.orm import Session
 
 from core.logging import setup_logger
@@ -157,8 +157,8 @@ class EnrichmentOrchestrator:
                     SELECT sub_ticket_id, runbook_resolution, rag_resolution, decision_reason, confidence_score, source_used
                     FROM sub_ticket_ai_analysis
                     WHERE sub_ticket_id IN :ids
-                """)
-                sub_ais = self.db.execute(sub_ais_query, {"ids": tuple(sub_ticket_ids)}).mappings().all()
+                """).bindparams(bindparam("ids", expanding=True))
+                sub_ais = self.db.execute(sub_ais_query, {"ids": list(sub_ticket_ids)}).mappings().all()
 
             # Query comments for main ticket
             main_comments_query = text("""
@@ -177,8 +177,8 @@ class EnrichmentOrchestrator:
                     FROM sub_ticket_comments
                     WHERE sub_ticket_id IN :ids
                     ORDER BY created_at ASC
-                """)
-                sub_comments = self.db.execute(sub_comments_query, {"ids": tuple(sub_ticket_ids)}).mappings().all()
+                """).bindparams(bindparam("ids", expanding=True))
+                sub_comments = self.db.execute(sub_comments_query, {"ids": list(sub_ticket_ids)}).mappings().all()
 
             # Resolve user classifications from user IDs involved
             comment_author_strs = {c["commented_by"] for c in main_comments if c["commented_by"]} | \
@@ -208,8 +208,8 @@ class EnrichmentOrchestrator:
                     SELECT id, user_type, role, name
                     FROM users
                     WHERE id IN :ids
-                """)
-                users_rows = self.db.execute(users_query, {"ids": tuple(user_uuids)}).mappings().all()
+                """).bindparams(bindparam("ids", expanding=True))
+                users_rows = self.db.execute(users_query, {"ids": list(user_uuids)}).mappings().all()
                 user_type_map = {row["id"]: row for row in users_rows}
 
             # Function to classify author
@@ -568,7 +568,10 @@ class EnrichmentOrchestrator:
             )
 
             # Step 9: Trigger Downstream Customer Clustering & Health Evaluation
+            # Core enrichment is already committed above. Downstream failures must
+            # not roll back the persisted enrichment results.
             if customer_id:
+                # --- Clustering stage ---
                 try:
                     logger.info(
                         "Triggering downstream clustering for customer_id=%s",
@@ -580,11 +583,21 @@ class EnrichmentOrchestrator:
 
                     clustering_service = CustomerClusteringService(self.db)
                     clustering_service.group_customer_issues(customer_id)
+                    self.db.commit()
                     logger.info(
-                        "Clustering completed successfully for customer_id=%s",
+                        "Clustering completed and committed for customer_id=%s",
+                        customer_id,
+                    )
+                except Exception:
+                    self.db.rollback()
+                    logger.exception(
+                        "Clustering failed for customer_id=%s. "
+                        "Core enrichment remains committed.",
                         customer_id,
                     )
 
+                # --- Customer health stage ---
+                try:
                     logger.info(
                         "Triggering customer health evaluation for customer_id=%s",
                         customer_id,
@@ -595,21 +608,22 @@ class EnrichmentOrchestrator:
 
                     health_service = CustomerHealthService(self.db)
                     health_service.evaluate_customer_health(customer_id)
+                    self.db.commit()
                     logger.info(
-                        "Customer health evaluation completed for customer_id=%s",
+                        "Customer health evaluation completed and committed for customer_id=%s",
                         customer_id,
                     )
-                except Exception as downstream_exc:
+                except Exception:
+                    self.db.rollback()
                     logger.exception(
-                        "Downstream pipeline triggers failed for customer_id=%s. "
-                        "Continuing as enrichment transaction is already committed.",
+                        "Customer health evaluation failed for customer_id=%s. "
+                        "Core enrichment remains committed.",
                         customer_id,
                     )
             else:
                 logger.warning(
                     "Skipped customer clustering and health: customer_id is unresolved"
                 )
-
 
             return True
 
