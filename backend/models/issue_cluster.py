@@ -4,9 +4,19 @@ SQLAlchemy database model representing ML-generated issue/topic clusters and cat
 """
 
 import uuid
-from sqlalchemy import Column, Integer, Text, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, Text, DateTime, ForeignKey, Boolean
 from sqlalchemy.dialects.postgresql import UUID
 from db.base_class import Base
+
+class RootCauseTaxonomy(Base):
+    """SQLAlchemy model representing the root cause taxonomy."""
+
+    __tablename__ = "root_cause_taxonomy"
+
+    category = Column(Text, primary_key=True, comment="Primary key category name")
+    description = Column(Text, nullable=True)
+    is_active = Column(Boolean, nullable=True, default=True)
+    created_at = Column(DateTime(timezone=True), nullable=True)
 
 class IssueCluster(Base):
     """SQLAlchemy model representing ML-generated issue/topic clusters.
