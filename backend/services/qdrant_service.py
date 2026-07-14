@@ -251,6 +251,7 @@ class QdrantService:
         vector: list[float],
         limit: int,
         score_threshold: float,
+        customer_id: Optional[Any] = None,
     ) -> list[dict[str, Any]]:
         """Run nearest-neighbour similarity search in Qdrant using query_points.
 
@@ -258,17 +259,31 @@ class QdrantService:
             vector: The query vector to search against.
             limit: Maximum number of results to return.
             score_threshold: Minimum similarity score to include.
+            customer_id: Optional customer UUID to filter matches.
 
         Returns:
             A list of dicts ``[{"id": ..., "score": ..., "payload": {...}}, ...]``
             ordered by descending similarity score.
         """
         try:
+            query_filter = None
+            if customer_id is not None:
+                from qdrant_client.models import Filter, FieldCondition, MatchValue
+                query_filter = Filter(
+                    must=[
+                        FieldCondition(
+                            key="customer_id",
+                            match=MatchValue(value=str(customer_id))
+                        )
+                    ]
+                )
+
             res = self._client.query_points(
                 collection_name=self._collection_name,
                 query=vector,
                 limit=limit,
                 score_threshold=score_threshold,
+                query_filter=query_filter,
                 with_payload=True,
             )
 
@@ -284,10 +299,11 @@ class QdrantService:
 
             logger.info(
                 "Qdrant similarity search returned %d result(s) "
-                "(limit=%d threshold=%.3f)",
+                "(limit=%d threshold=%.3f customer_id=%s)",
                 len(matches),
                 limit,
                 score_threshold,
+                customer_id,
             )
             return matches
 

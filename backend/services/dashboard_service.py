@@ -79,16 +79,37 @@ class DashboardService:
             CategoryMetric(category=cat, count=cnt) for cat, cnt in categories
         ]
 
-        recent_clusters = [
-            RecentCluster(
-                cluster_id=c.cluster_id,
-                cluster_name=c.cluster_name,
-                issue_category=c.issue_category,
-                frequency_count=c.frequency_count or 0,
-                last_seen_at=c.last_seen_at,
+        from models.operational_analysis import OperationalAnalysis
+        from repositories.dashboard_repository import users_table
+
+        recent_clusters = []
+        for c in clusters:
+            customer_id = None
+            customer_name = None
+            member = (
+                self.db.query(
+                    OperationalAnalysis.customer_id,
+                    users_table.c.name
+                )
+                .outerjoin(users_table, users_table.c.id == OperationalAnalysis.customer_id)
+                .filter(OperationalAnalysis.cluster_id == c.cluster_id)
+                .first()
             )
-            for c in clusters
-        ]
+            if member:
+                customer_id = member[0]
+                customer_name = member[1]
+
+            recent_clusters.append(
+                RecentCluster(
+                    cluster_id=c.cluster_id,
+                    customer_id=customer_id,
+                    customer_name=customer_name,
+                    cluster_name=c.cluster_name,
+                    issue_category=c.issue_category,
+                    frequency_count=c.frequency_count or 0,
+                    last_seen_at=c.last_seen_at,
+                )
+            )
 
         return OperationalDashboardResponse(
             total_interactions=stats["total_interactions"],

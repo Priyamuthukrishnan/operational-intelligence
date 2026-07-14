@@ -55,6 +55,8 @@ class RecentCluster(BaseModel):
     """Summary of a recently generated issue cluster."""
 
     cluster_id: uuid.UUID = Field(..., description="Identifier of the cluster")
+    customer_id: Optional[uuid.UUID] = Field(None, description="The customer identifier")
+    customer_name: Optional[str] = Field(None, description="Human-readable customer name")
     cluster_name: Optional[str] = Field(None, description="System-generated label")
     issue_category: Optional[str] = Field(None, description="Category of the cluster")
     frequency_count: int = Field(..., description="Number of members in the cluster")

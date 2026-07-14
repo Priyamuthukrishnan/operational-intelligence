@@ -101,8 +101,8 @@ SUBJECT_MAPPING = {
     "sign-in": "Password Reset and Login Failures",
     "wifi": "WiFi Access and Connectivity Failures",
     "wi-fi": "WiFi Access and Connectivity Failures",
-    "blue screen": "System Blue Screen Failures",
-    "bsod": "System Blue Screen Failures",
+    "blue screen": "Blue Screen Errors",
+    "bsod": "Blue Screen Errors",
     "inventory": "Inventory Synchronization Failures",
     "overselling": "Inventory Synchronization Failures",
     "wms": "Inventory Synchronization Failures",
@@ -494,7 +494,7 @@ class CustomerClusteringService:
     # ── Similarity Search ────────────────────────────────────────────────
 
     def find_similar_interactions(
-        self, vector_id: str, vector: list[float]
+        self, vector_id: str, vector: list[float], customer_id: Optional[Any] = None
     ) -> list[SimilarInteraction]:
         """Find interactions similar to a given vector.
 
@@ -505,6 +505,7 @@ class CustomerClusteringService:
             vector_id: The Qdrant point ID of the source vector
                 (used to exclude self-match).
             vector: The actual embedding vector to search with.
+            customer_id: Optional customer UUID to filter matches.
 
         Returns:
             A list of :class:`SimilarInteraction` results sorted by
@@ -515,14 +516,16 @@ class CustomerClusteringService:
             return []
 
         logger.info(
-            "Executing Qdrant similarity search with source vector_id=%s",
-            vector_id
+            "Executing Qdrant similarity search with source vector_id=%s customer_id=%s",
+            vector_id,
+            customer_id,
         )
 
         raw_results = self._qdrant.search_similar(
             vector=vector,
             limit=self._settings.SIMILARITY_SEARCH_LIMIT,
             score_threshold=self._settings.SIMILARITY_THRESHOLD,
+            customer_id=customer_id,
         )
 
         logger.info(
@@ -552,6 +555,33 @@ class CustomerClusteringService:
                     result["score"]
                 )
                 continue
+
+            # 1. Payload validation
+            payload = result.get("payload") or {}
+            match_cust_id = payload.get("customer_id")
+            if customer_id is not None and match_cust_id:
+                if str(match_cust_id).lower().strip() != str(customer_id).lower().strip():
+                    logger.warning(
+                        "Payload Customer validation failed for matched vector %s: %s != %s",
+                        result["id"],
+                        match_cust_id,
+                        customer_id
+                    )
+                    continue
+
+            # 2. Database level validation
+            if customer_id is not None:
+                oa_match = self._db.query(OperationalAnalysis.id).filter(
+                    OperationalAnalysis.qdrant_vector_id == result["id"],
+                    OperationalAnalysis.customer_id == customer_id
+                ).first()
+                if not oa_match:
+                    logger.warning(
+                        "DB Customer validation failed for matched vector %s: does not belong to customer %s in PostgreSQL",
+                        result["id"],
+                        customer_id
+                    )
+                    continue
 
             similar.append(
                 SimilarInteraction(
@@ -606,6 +636,7 @@ class CustomerClusteringService:
             similar = self.find_similar_interactions(
                 vector_id=entry["vector_id"],
                 vector=entry["vector"],
+                customer_id=customer_id,
             )
 
             if not similar:
@@ -1210,7 +1241,17 @@ class CustomerClusteringService:
             try:
                 active_member_ids = []
                 
-                # Query category and ticket details for all interactions of this customer to avoid N+1 queries
+                # Verify columns presence in live database schema
+                from sqlalchemy import inspect
+                inspector = inspect(self._db.bind)
+                
+                ticket_cols = [c["name"] for c in inspector.get_columns("tickets")]
+                has_ticket_category = "category" in ticket_cols
+                
+                ai_cols = [c["name"] for c in inspector.get_columns("ai_analysis")]
+                has_ai_category = "category_prediction" in ai_cols
+                
+                # Fetch category and ticket details for all interactions of this customer to avoid N+1 queries
                 category_rows = (
                     self._db.query(
                         OperationalAnalysis.id,
@@ -1236,18 +1277,39 @@ class CustomerClusteringService:
                         "description": row[5]
                     }
 
+                # Query active clusters for customer (excluding the old mixed cluster '72a2a54b-e0ab-559a-9eec-2479273200c4')
+                from sqlalchemy import text
+                from models.issue_cluster import IssueCluster
+                active_clusters = self._db.query(IssueCluster).filter(
+                    self._db.query(OperationalAnalysis.id)
+                    .filter(
+                        OperationalAnalysis.cluster_id == IssueCluster.cluster_id,
+                        OperationalAnalysis.customer_id == customer_id
+                    )
+                    .exists()
+                ).filter(IssueCluster.cluster_id != uuid.UUID("72a2a54b-e0ab-559a-9eec-2479273200c4")).all()
+
+                from collections import Counter
+
                 for cluster in issue_clusters:
                     if cluster.interaction_count > 1:
-                        # 1. Generate deterministic UUID v5 from sorted interaction IDs
-                        sorted_ids = sorted(str(idx).lower().strip() for idx in cluster.interaction_ids)
-                        concat_ids = ",".join(sorted_ids)
-                        det_cluster_id = uuid.uuid5(uuid.NAMESPACE_DNS, f"cluster-{concat_ids}")
-                        cluster.cluster_id = det_cluster_id
-                        
-                        # 2. Extract timestamps
+                        # Find distinct member tickets and interactions
                         cluster_interactions = [i for i in interactions if i.id in cluster.interaction_ids]
-                        first_seen = min((i.captured_at for i in cluster_interactions if i.captured_at is not None), default=None)
-                        last_seen = max((i.captured_at for i in cluster_interactions if i.captured_at is not None), default=None)
+                        ticket_ids_set = {i.ticket_id for i in cluster_interactions}
+                        
+                        # 1. Determine anchor ticket (earliest chronologically captured canonical main-ticket UUID)
+                        valid_ints = [i for i in cluster_interactions if i.captured_at is not None]
+                        if not valid_ints:
+                            valid_ints = cluster_interactions
+                        sorted_ints = sorted(valid_ints, key=lambda x: x.captured_at if x.captured_at is not None else datetime.min.replace(tzinfo=timezone.utc))
+                        anchor_ticket_id = sorted_ints[0].ticket_id
+                        
+                        # Validation: Anchor ticket UUID must exist in the set of member ticket IDs
+                        assert anchor_ticket_id in ticket_ids_set, f"Anchor ticket ID {anchor_ticket_id} must be in cluster member tickets {ticket_ids_set}"
+                        
+                        captured_dates = [i.captured_at for i in cluster_interactions if i.captured_at is not None]
+                        first_seen = min(captured_dates, default=None)
+                        last_seen = max(captured_dates, default=None)
                         
                         # Try to find a valid root cause category to satisfy foreign key validation
                         root_cause = None
@@ -1259,69 +1321,141 @@ class CustomerClusteringService:
                                     root_cause = i.root_cause_category
                                     break
                                     
-                        # Determine dominant category using source priority:
-                        # 1. ai_analysis.category_prediction
-                        # 2. tickets.category
-                        # 3. operational_analysis.root_cause_category
-                        # 4. Service Intelligence keyword fallback
-                        # 5. "General Support"
-                        category_candidates = []
-                        for member_id in cluster.interaction_ids:
-                            meta = interaction_meta.get(member_id, {})
-                            ai_cat = meta.get("ai_category")
-                            ticket_cat = meta.get("ticket_category")
-                            oa_cat = meta.get("root_cause")
-                            title = meta.get("title")
-                            desc = meta.get("description")
+                        # Dominant category resolution per distinct ticket_id:
+                        ticket_resolved_categories = {}
+                        for tid in ticket_ids_set:
+                            ticket_ints = [i for i in cluster_interactions if i.ticket_id == tid]
+                            raw_cat = None
                             
-                            cand = None
-                            if ai_cat and ai_cat.strip():
-                                cand = ai_cat.strip()
-                            elif ticket_cat and ticket_cat.strip():
-                                cand = ticket_cat.strip()
-                            elif oa_cat and oa_cat.strip():
-                                cand = oa_cat.strip()
-                            else:
-                                text_content = f"{title or ''} {desc or ''}".lower()
-                                for kw, cat in {
-                                    "erp": "ERP",
-                                    "finance": "Finance",
-                                    "billing": "Finance",
-                                    "invoice": "Finance",
-                                    "tax": "Finance",
-                                    "auth": "Access Management",
-                                    "login": "Access Management",
-                                    "password": "Access Management",
-                                    "access": "Access Management",
-                                    "permission": "Access Management",
-                                    "report": "Reporting",
-                                    "db": "Database",
-                                    "database": "Database",
-                                    "network": "Network",
-                                    "performance": "Performance",
-                                    "outage": "Service Outage",
-                                    "down": "Service Outage",
-                                }.items():
-                                    if kw in text_content:
-                                        cand = cat
-                                        break
-                            if cand:
-                                category_candidates.append(cand)
+                            # 1. ai_analysis.category_prediction
+                            if has_ai_category:
+                                for i in ticket_ints:
+                                    if i.ai_analysis_id:
+                                        ai_row = self._db.execute(
+                                            text("SELECT category_prediction FROM ai_analysis WHERE id = :aid"),
+                                            {"aid": i.ai_analysis_id}
+                                        ).mappings().first()
+                                        if ai_row and ai_row["category_prediction"]:
+                                            raw_cat = ai_row["category_prediction"]
+                                            break
+                                if raw_cat:
+                                    ticket_resolved_categories[tid] = raw_cat
+                                    continue
+                                    
+                            # 2. tickets.category
+                            if has_ticket_category:
+                                ticket_row = self._db.execute(
+                                    text("SELECT category FROM tickets WHERE id = :tid"),
+                                    {"tid": tid}
+                                ).mappings().first()
+                                if ticket_row and ticket_row["category"]:
+                                    raw_cat = ticket_row["category"]
+                                    ticket_resolved_categories[tid] = raw_cat
+                                    continue
+                                    
+                            # 3. operational_analysis.root_cause_category
+                            for i in ticket_ints:
+                                if i.root_cause_category:
+                                    raw_cat = i.root_cause_category
+                                    break
+                            if raw_cat:
+                                ticket_resolved_categories[tid] = raw_cat
+                                continue
                                 
-                        dominant_category = None
-                        if category_candidates:
-                            from collections import Counter
-                            counts = Counter(category_candidates)
-                            dominant_category = counts.most_common(1)[0][0]
+                            # 4. Keyword fallback
+                            ticket_text_row = self._db.execute(
+                                text("SELECT title, description FROM tickets WHERE id = :tid"),
+                                {"tid": tid}
+                            ).mappings().first()
+                            title_text = ticket_text_row["title"] if ticket_text_row else ""
+                            desc_text = ticket_text_row["description"] if ticket_text_row else ""
+                            summary_text = ""
+                            for i in ticket_ints:
+                                if i.query_summary:
+                                    summary_text = i.query_summary
+                                    break
+                                    
+                            combined_text = f"{title_text or ''} {desc_text or ''} {summary_text or ''}".lower()
+                            for kw, cat in {
+                                "erp": "ERP",
+                                "finance": "Finance",
+                                "billing": "Finance",
+                                "invoice": "Finance",
+                                "tax": "Finance",
+                                "auth": "Access Management",
+                                "login": "Access Management",
+                                "password": "Access Management",
+                                "access": "Access Management",
+                                "permission": "Access Management",
+                                "report": "Reporting",
+                                "db": "Database",
+                                "database": "Database",
+                                "network": "Network",
+                                "wifi": "Network",
+                                "wi-fi": "Network",
+                                "performance": "Performance",
+                                "slow": "Performance",
+                                "outage": "Service Outage",
+                                "down": "Service Outage",
+                                "blue screen": "Software",
+                                "bsod": "Software",
+                            }.items():
+                                if kw in combined_text:
+                                    raw_cat = cat
+                                    break
+                            if raw_cat:
+                                ticket_resolved_categories[tid] = raw_cat
+                                continue
+                                
+                            # 5. General Support
+                            ticket_resolved_categories[tid] = "General Support"
                             
-                        issue_cat = _normalize_category(dominant_category)
+                        # Get dominant resolved category
+                        resolved_cats = list(ticket_resolved_categories.values())
+                        dominant_raw_cat = Counter(resolved_cats).most_common(1)[0][0] if resolved_cats else "General Support"
                         
-                        # Generate concise cluster name based on common keyword matches
+                        # Normalize display label
+                        def _normalize_display_category(cat: str) -> str:
+                            cat_clean = cat.strip().lower().replace("_", " ").replace("-", " ")
+                            if cat_clean in ("access_management", "access management", "access_permission"):
+                                return "Access Management"
+                            if cat_clean in ("performance_degradation", "performance degradation"):
+                                return "Performance"
+                            if cat_clean in ("integration_failure", "integration failure"):
+                                return "Integration Failure"
+                            if cat_clean in ("software_bug", "software bug"):
+                                return "Software"
+                            if "auth" in cat_clean or "login" in cat_clean:
+                                return "Authentication"
+                            if "erp" in cat_clean:
+                                return "ERP"
+                            if "finance" in cat_clean or "billing" in cat_clean or "tax" in cat_clean or "invoice" in cat_clean:
+                                return "Finance"
+                            if "report" in cat_clean:
+                                return "Reporting"
+                            if "database" in cat_clean or "db" in cat_clean or "sql" in cat_clean:
+                                return "Database"
+                            if "network" in cat_clean or "wifi" in cat_clean or "wi-fi" in cat_clean:
+                                return "Network"
+                            if "performance" in cat_clean or "slow" in cat_clean:
+                                return "Performance"
+                            if "outage" in cat_clean or "down" in cat_clean:
+                                return "Service Outage"
+                            if "software" in cat_clean:
+                                return "Software"
+                            return cat.strip().title()
+                            
+                        display_cat = _normalize_display_category(dominant_raw_cat)
+                        
+                        # Generate concise cluster name based on keywords in ticket titles
                         subject_hits = Counter()
                         sorted_subjects = sorted(SUBJECT_MAPPING.keys(), key=len, reverse=True)
-                        for member_id in cluster.interaction_ids:
-                            meta = interaction_meta.get(member_id, {})
-                            title = (meta.get("title") or "").strip().lower()
+                        for tid in ticket_ids_set:
+                            ticket_row = self._db.execute(
+                                text("SELECT title FROM tickets WHERE id = :tid"),
+                                {"tid": tid}
+                            ).mappings().first()
+                            title = (ticket_row["title"] if ticket_row else "").strip().lower()
                             if title:
                                 for kw in sorted_subjects:
                                     if kw in title:
@@ -1335,9 +1469,81 @@ class CustomerClusteringService:
                             rc_candidates = [r for r in rc_list if r]
                             rc_dominant = Counter(rc_candidates).most_common(1)[0][0] if rc_candidates else "General"
                             rc_clean = rc_dominant.replace("_", " ").title()
-                            cluster_name = f"{rc_clean} {issue_cat} Issues"
+                            if rc_clean.lower() in display_cat.lower():
+                                cluster_name = f"{rc_clean} Access and Setup Issues" if "access" in rc_clean.lower() else f"{rc_clean} System Issues"
+                            else:
+                                cluster_name = f"{rc_clean} {display_cat} System Issues"
+                                
+                        # Map to broad category ensuring agreement with name keywords
+                        def _map_to_broad_category(display_c: str, c_name: str) -> str:
+                            name_lower = c_name.lower()
+                            if "password" in name_lower or "reset" in name_lower:
+                                return "Access Management"
+                            if "login" in name_lower or "signin" in name_lower or "sign-in" in name_lower:
+                                return "Authentication"
+                            if "inventory" in name_lower or "wms" in name_lower:
+                                return "ERP"
+                            if "invoice" in name_lower or "tax" in name_lower:
+                                return "Finance"
+                            if "report" in name_lower or "reporting" in name_lower:
+                                return "Reporting"
+                            if "database" in name_lower or "sql" in name_lower or "query" in name_lower:
+                                return "Database"
+                            if "network" in name_lower or "connection" in name_lower or "wifi" in name_lower or "wi-fi" in name_lower:
+                                return "Network"
+                            if "performance" in name_lower or "slow" in name_lower or "degradation" in name_lower:
+                                return "Performance"
+                            if "outage" in name_lower or "downtime" in name_lower or "down" in name_lower:
+                                return "Service Outage"
+                            if "blue screen" in name_lower or "bsod" in name_lower:
+                                return "Software"
+                                
+                            cat_lower = display_c.lower()
+                            if "access" in cat_lower or "permission" in cat_lower:
+                                return "Access Management"
+                            if "auth" in cat_lower or "login" in cat_lower:
+                                return "Authentication"
+                            if "erp" in cat_lower or "integration" in cat_lower:
+                                return "ERP"
+                            if "finance" in cat_lower or "billing" in cat_lower or "tax" in cat_lower or "invoice" in cat_lower:
+                                return "Finance"
+                            if "report" in cat_lower:
+                                return "Reporting"
+                            if "database" in cat_lower or "db" in cat_lower:
+                                return "Database"
+                            if "network" in cat_lower or "wi-fi" in cat_lower or "wifi" in cat_lower:
+                                return "Network"
+                            if "performance" in cat_lower or "slow" in cat_lower:
+                                return "Performance"
+                            if "outage" in cat_lower or "down" in cat_lower:
+                                return "Service Outage"
+                            if "software" in cat_lower:
+                                return "Software"
+                            return "General Support"
                             
+                        issue_cat = _map_to_broad_category(display_cat, cluster_name)
                         cluster.cluster_label = cluster_name
+                        
+                        # Active cluster reuse check
+                        matched_existing = None
+                        for existing in active_clusters:
+                            if existing.issue_category != issue_cat:
+                                continue
+                            # Member overlap check:
+                            if any(i.cluster_id == existing.cluster_id for i in cluster_interactions):
+                                matched_existing = existing
+                                break
+                                
+                        if matched_existing:
+                            det_cluster_id = matched_existing.cluster_id
+                        else:
+                            stable_key = f"customer-{customer_id}-anchor-{str(anchor_ticket_id).lower().strip()}"
+                            det_cluster_id = uuid.uuid5(uuid.NAMESPACE_DNS, stable_key)
+                            
+                        cluster.cluster_id = det_cluster_id
+                        
+                        # Calculate frequency from unique ticket IDs
+                        frequency_count = len(ticket_ids_set)
                         
                         # 3. Upsert issue cluster record
                         self._repository.upsert_issue_cluster(
@@ -1345,7 +1551,7 @@ class CustomerClusteringService:
                             cluster_name=cluster_name,
                             issue_category=issue_cat,
                             root_cause_category=root_cause,
-                            frequency_count=cluster.interaction_count,
+                            frequency_count=frequency_count,
                             first_seen_at=first_seen,
                             last_seen_at=last_seen,
                         )
@@ -1357,7 +1563,7 @@ class CustomerClusteringService:
                         )
                         
                         active_member_ids.extend(cluster.interaction_ids)
-                        logger.info("Persisted issue cluster: name=%s id=%s count=%d", cluster.cluster_label, det_cluster_id, cluster.interaction_count)
+                        logger.info("Persisted issue cluster: name=%s id=%s count=%d frequency=%d", cluster.cluster_label, det_cluster_id, cluster.interaction_count, frequency_count)
                 
                 # 5. Safely clear other interactions for this customer not in active clusters
                 self._repository.clear_interaction_cluster_ids(

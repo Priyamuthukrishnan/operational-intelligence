@@ -135,9 +135,15 @@ class DashboardRepository:
         return [(r[0], r[1]) for r in rows]
 
     def get_recent_clusters(self, limit: int = 5) -> list[IssueCluster]:
-        """Retrieve recently modified issue clusters."""
+        """Retrieve recently modified issue clusters with at least one active member."""
+        from models.operational_analysis import OperationalAnalysis
         return (
             self.db.query(IssueCluster)
+            .filter(
+                self.db.query(OperationalAnalysis.id)
+                .filter(OperationalAnalysis.cluster_id == IssueCluster.cluster_id)
+                .exists()
+            )
             .order_by(desc(IssueCluster.last_seen_at))
             .limit(limit)
             .all()
