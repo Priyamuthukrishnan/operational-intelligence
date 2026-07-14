@@ -40,8 +40,14 @@ class ClusteringFeaturePlaceholder(BaseModel):
     sentiment_score: Optional[float] = Field(
         None, description="Sentiment score (populated by Sentiment Engine)"
     )
+    sentiment_score_out_of_10: Optional[float] = Field(
+        None, description="Sentiment score scaled out of 10"
+    )
     escalation_risk_score: Optional[float] = Field(
         None, description="Escalation risk probability (populated by Escalation Risk Engine)"
+    )
+    escalation_risk_score_out_of_10: Optional[float] = Field(
+        None, description="Escalation risk score scaled out of 10"
     )
     root_cause_category: Optional[str] = Field(
         None, description="Predicted root-cause category (populated by Root Cause Engine)"
@@ -106,6 +112,9 @@ class SimilarInteraction(BaseModel):
     similarity_score: float = Field(
         ..., description="Cosine similarity score from Qdrant"
     )
+    similarity_score_out_of_10: Optional[float] = Field(
+        None, description="Similarity score scaled out of 10"
+    )
     payload: Optional[dict[str, Any]] = Field(
         default=None,
         description="Qdrant point payload (metadata attached to the vector)",
@@ -132,6 +141,10 @@ class SimilarityGroup(BaseModel):
         None,
         description="Average similarity score across all matches in this group",
     )
+    avg_similarity_score_out_of_10: Optional[float] = Field(
+        None,
+        description="Average similarity score scaled out of 10",
+    )
 
 
 class RepeatIssueDetail(BaseModel):
@@ -150,8 +163,15 @@ class RepeatIssueDetail(BaseModel):
         default_factory=list,
         description="Individual similarity scores of each occurrence",
     )
+    similarity_scores_out_of_10: Optional[list[float]] = Field(
+        None,
+        description="Individual similarity scores scaled out of 10",
+    )
     avg_similarity: Optional[float] = Field(
         None, description="Average similarity across occurrences"
+    )
+    avg_similarity_out_of_10: Optional[float] = Field(
+        None, description="Average similarity scaled out of 10"
     )
 
 
@@ -190,8 +210,14 @@ class CustomerClusterSummary(BaseModel):
     avg_sentiment_score: Optional[float] = Field(
         None, description="Average sentiment score across all interactions"
     )
+    avg_sentiment_score_out_of_10: Optional[float] = Field(
+        None, description="Average sentiment score scaled out of 10"
+    )
     avg_escalation_risk: Optional[float] = Field(
         None, description="Average escalation risk score across all interactions"
+    )
+    avg_escalation_risk_out_of_10: Optional[float] = Field(
+        None, description="Average escalation risk score scaled out of 10"
     )
     ticket_ids: list[uuid.UUID] = Field(
         default_factory=list,
@@ -229,6 +255,9 @@ class IssueClusterGroup(BaseModel):
     )
     avg_similarity_score: Optional[float] = Field(
         None, description="Average similarity score within this cluster"
+    )
+    avg_similarity_score_out_of_10: Optional[float] = Field(
+        None, description="Average similarity score scaled out of 10"
     )
     root_cause_categories: list[str] = Field(
         default_factory=list,
@@ -328,11 +357,20 @@ class RepeatIssueCluster(BaseModel):
     avg_similarity_score: float = Field(
         ..., description="Average similarity score of the subtickets to the parent ticket"
     )
+    avg_similarity_score_out_of_10: Optional[float] = Field(
+        None, description="Average similarity score scaled out of 10"
+    )
     avg_sentiment_score: Optional[float] = Field(
         None, description="Average sentiment score across all interactions in the cluster"
     )
+    avg_sentiment_score_out_of_10: Optional[float] = Field(
+        None, description="Average sentiment score scaled out of 10"
+    )
     avg_escalation_risk: Optional[float] = Field(
         None, description="Average escalation risk score across all interactions in the cluster"
+    )
+    avg_escalation_risk_out_of_10: Optional[float] = Field(
+        None, description="Average escalation risk score scaled out of 10"
     )
 
 

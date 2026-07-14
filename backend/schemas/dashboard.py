@@ -37,6 +37,7 @@ class RecentEscalation(BaseModel):
     )
     sentiment_label: Optional[str] = Field(None, description="Sentiment classification")
     escalation_risk_score: float = Field(..., description="Escalation risk probability")
+    escalation_risk_score_out_of_10: Optional[float] = Field(None, description="Escalation risk score scaled out of 10")
     escalation_risk_band: str = Field(..., description="Risk band: high or critical")
     query_summary: Optional[str] = Field(None, description="Query summary statement")
     repeat_count: Optional[int] = Field(
@@ -68,7 +69,9 @@ class OperationalDashboardResponse(BaseModel):
     resolved_tickets: int = Field(..., description="Total resolved tickets (has response summary)")
     resolution_rate: float = Field(..., description="Ratio of resolved tickets")
     average_sentiment: Optional[float] = Field(None, description="Average sentiment score")
+    average_sentiment_out_of_10: Optional[float] = Field(None, description="Average sentiment score scaled out of 10")
     average_escalation_risk: Optional[float] = Field(None, description="Average escalation risk score")
+    average_escalation_risk_out_of_10: Optional[float] = Field(None, description="Average escalation risk score scaled out of 10")
     critical_escalations_count: int = Field(..., description="Number of critical/high risk tickets")
     recent_escalations: list[RecentEscalation] = Field(
         default_factory=list, description="Recent high-risk escalations"
@@ -109,7 +112,9 @@ class TrendMetric(BaseModel):
     ticket_count: int = Field(..., description="Total unique tickets during the period")
     resolution_rate: float = Field(..., description="Resolution rate during the period")
     average_sentiment: Optional[float] = Field(None, description="Average sentiment score")
+    average_sentiment_out_of_10: Optional[float] = Field(None, description="Average sentiment score scaled out of 10")
     average_escalation_risk: Optional[float] = Field(None, description="Average escalation risk")
+    average_escalation_risk_out_of_10: Optional[float] = Field(None, description="Average escalation risk score scaled out of 10")
 
 
 class AtRiskCustomer(BaseModel):
@@ -121,8 +126,11 @@ class AtRiskCustomer(BaseModel):
         description="Human-readable customer name"
     )
     health_score: float = Field(..., description="Current customer health score (0-100)")
+    health_score_out_of_10: Optional[float] = Field(None, description="Current customer health score scaled out of 10")
     sentiment_average: Optional[float] = Field(None, description="Average sentiment score")
+    sentiment_average_out_of_10: Optional[float] = Field(None, description="Average sentiment score scaled out of 10")
     escalation_risk_average: Optional[float] = Field(None, description="Average escalation risk")
+    escalation_risk_average_out_of_10: Optional[float] = Field(None, description="Average escalation risk score scaled out of 10")
     interaction_count: int = Field(..., description="Total interactions for this customer")
 
 
@@ -130,9 +138,12 @@ class ExecutiveDashboardResponse(BaseModel):
     """Data payload for the C-suite Executive summary dashboard."""
 
     overall_health_index: float = Field(..., description="Average health score across all customer accounts")
+    overall_health_index_out_of_10: Optional[float] = Field(None, description="Average health score scaled out of 10")
     health_distribution: HealthDistribution = Field(..., description="Breakdown of customer account health states")
     average_sentiment: Optional[float] = Field(None, description="Mean sentiment score across all interactions")
+    average_sentiment_out_of_10: Optional[float] = Field(None, description="Mean sentiment score scaled out of 10")
     average_escalation_risk: Optional[float] = Field(None, description="Mean escalation risk across all interactions")
+    average_escalation_risk_out_of_10: Optional[float] = Field(None, description="Mean escalation risk scaled out of 10")
     risk_distribution: RiskDistribution = Field(..., description="Risk classification profile of interactions")
     weekly_trends: list[TrendMetric] = Field(
         default_factory=list, description="Weekly rolling analytics trends"
@@ -154,8 +165,11 @@ class CustomerInteractionDetail(BaseModel):
     response_summary: Optional[str] = Field(None, description="Action taken resolution summary")
     sentiment_label: Optional[str] = Field(None, description="Sentiment classification")
     sentiment_score: Optional[float] = Field(None, description="Sentiment score")
+    sentiment_score_out_of_10: Optional[float] = Field(None, description="Sentiment score scaled out of 10")
     escalation_risk_score: Optional[float] = Field(None, description="Escalation risk score")
+    escalation_risk_score_out_of_10: Optional[float] = Field(None, description="Escalation risk score scaled out of 10")
     escalation_risk_band: Optional[str] = Field(None, description="Escalation risk band")
+    root_cause_confidence_out_of_10: Optional[float] = Field(None, description="Root cause confidence score scaled out of 10")
     root_cause_category: Optional[str] = Field(None, description="Predicted root cause category")
     captured_at: datetime = Field(..., description="Timestamp event was captured")
 
@@ -165,8 +179,11 @@ class CustomerDashboardResponse(BaseModel):
 
     customer_id: uuid.UUID = Field(..., description="The queried customer identifier")
     health_score: float = Field(..., description="Composite customer health score (0-100)")
+    health_score_out_of_10: Optional[float] = Field(None, description="Composite customer health score scaled out of 10")
     sentiment_average: Optional[float] = Field(None, description="Average sentiment score")
+    sentiment_average_out_of_10: Optional[float] = Field(None, description="Average sentiment score scaled out of 10")
     escalation_risk_average: Optional[float] = Field(None, description="Average escalation risk score")
+    escalation_risk_average_out_of_10: Optional[float] = Field(None, description="Average escalation risk score scaled out of 10")
     repeat_issue_frequency: Optional[float] = Field(None, description="Ratio of repeat interactions")
     resolution_rate: Optional[float] = Field(None, description="Ratio of resolved tickets")
     interaction_count: int = Field(..., description="Total interaction records found")

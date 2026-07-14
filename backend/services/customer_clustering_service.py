@@ -33,6 +33,11 @@ from core.config import get_settings
 from core.logging import setup_logger
 from models.operational_analysis import OperationalAnalysis
 from repositories.cluster_repository import ClusterRepository
+from utils.scoring import (
+    convert_sentiment_score,
+    convert_escalation_risk_score,
+    convert_similarity_score,
+)
 from schemas.clustering import (
     ClusteringFeaturePlaceholder,
     CustomerClusteringResponse,
@@ -274,7 +279,9 @@ class CustomerClusteringService:
                 response_summary=interaction.response_summary,
                 sentiment_label=interaction.sentiment_label,
                 sentiment_score=interaction.sentiment_score,
+                sentiment_score_out_of_10=convert_sentiment_score(interaction.sentiment_score),
                 escalation_risk_score=interaction.escalation_risk_score,
+                escalation_risk_score_out_of_10=convert_escalation_risk_score(interaction.escalation_risk_score),
                 root_cause_category=interaction.root_cause_category,
                 qdrant_vector_id=interaction.qdrant_vector_id,
             )
@@ -550,6 +557,7 @@ class CustomerClusteringService:
                 SimilarInteraction(
                     interaction_id=result["id"],
                     similarity_score=result["score"],
+                    similarity_score_out_of_10=convert_similarity_score(result["score"]),
                     payload=result.get("payload"),
                 )
             )
@@ -612,6 +620,7 @@ class CustomerClusteringService:
                 similar_interactions=similar,
                 group_size=len(similar),
                 avg_similarity_score=round(avg_score, 4) if avg_score else None,
+                avg_similarity_score_out_of_10=convert_similarity_score(avg_score),
             )
             groups.append(group)
 
@@ -688,11 +697,13 @@ class CustomerClusteringService:
             avg_sentiment_score=(
                 round(avg_sentiment, 4) if avg_sentiment is not None else None
             ),
+            avg_sentiment_score_out_of_10=convert_sentiment_score(avg_sentiment),
             avg_escalation_risk=(
                 round(avg_escalation, 4)
                 if avg_escalation is not None
                 else None
             ),
+            avg_escalation_risk_out_of_10=convert_escalation_risk_score(avg_escalation),
             ticket_ids=ticket_ids,
         )
 
@@ -802,6 +813,7 @@ class CustomerClusteringService:
                 interaction_count=len(interaction_ids),
                 occurrence_count=len(cluster_scores),
                 avg_similarity_score=avg_score,
+                avg_similarity_score_out_of_10=convert_similarity_score(avg_score),
                 root_cause_categories=sorted(categories_set),
                 interaction_ids=interaction_ids,
                 ticket_ids=sorted(ticket_ids_set),
@@ -1068,8 +1080,11 @@ class CustomerClusteringService:
                     first_seen=first_seen,
                     last_seen=last_seen,
                     avg_similarity_score=round(avg_similarity, 4),
+                    avg_similarity_score_out_of_10=convert_similarity_score(avg_similarity),
                     avg_sentiment_score=round(avg_sentiment, 4) if avg_sentiment is not None else None,
+                    avg_sentiment_score_out_of_10=convert_sentiment_score(avg_sentiment),
                     avg_escalation_risk=round(avg_escalation, 4) if avg_escalation is not None else None,
+                    avg_escalation_risk_out_of_10=convert_escalation_risk_score(avg_escalation),
                 )
                 repeat_issue_clusters.append(cluster)
 
@@ -1152,6 +1167,7 @@ class CustomerClusteringService:
 
         if vectors_available > 0:
             try:
+                from utils.scoring import convert_similarity_score
                 enriched_vectors = self.fetch_customer_vectors(customer_id)
                 similarity_groups = self.build_similarity_groups(customer_id, enriched_vectors=enriched_vectors)
                 if similarity_groups:
@@ -1176,7 +1192,9 @@ class CustomerClusteringService:
                                 source_vector_id=rep_vid or "",
                                 occurrence_count=cluster.interaction_count - 1,
                                 similarity_scores=[avg_sim] * (cluster.interaction_count - 1) if avg_sim is not None else [],
+                                similarity_scores_out_of_10=[convert_similarity_score(avg_sim)] * (cluster.interaction_count - 1) if avg_sim is not None else [],
                                 avg_similarity=avg_sim,
+                                avg_similarity_out_of_10=convert_similarity_score(avg_sim),
                             )
                             repeat_issues.append(detail)
             except Exception as exc:

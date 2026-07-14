@@ -13,6 +13,11 @@ from sqlalchemy.orm import Session
 from api.deps import get_db
 from core.logging import setup_logger
 from repositories.interaction_repository import InteractionRepository
+from schemas.intelligence import TicketRiskResponse
+from utils.scoring import (
+    convert_escalation_risk_score,
+    convert_confidence_decay_score,
+)
 
 logger = setup_logger(__name__)
 
@@ -21,6 +26,7 @@ router = APIRouter()
 
 @router.get(
     "/risk/{ticket_id}",
+    response_model=TicketRiskResponse,
     status_code=status.HTTP_200_OK,
     summary="Fetch stored ticket risk",
     description="Returns the latest stored escalation risk snapshot for a ticket.",
@@ -44,11 +50,14 @@ def get_ticket_risk(
         "ticket_id": ticket_id,
         "analysis_id": analysis.id,
         "escalation_risk_score": analysis.escalation_risk_score,
+        "escalation_risk_score_out_of_10": convert_escalation_risk_score(analysis.escalation_risk_score),
         "escalation_risk_band": analysis.escalation_risk_band,
         "confidence_decay_score": analysis.confidence_decay_score,
+        "confidence_decay_score_out_of_10": convert_confidence_decay_score(analysis.confidence_decay_score),
         "momentum_score": analysis.momentum_score,
         "risk_multiplier": analysis.risk_multiplier,
         "risk_reason": analysis.risk_reason,
         "risk_processed": analysis.risk_processed,
         "captured_at": analysis.captured_at,
     }
+
