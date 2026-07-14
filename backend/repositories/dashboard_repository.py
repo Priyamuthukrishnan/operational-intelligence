@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import uuid
 from typing import Any, Optional
-from sqlalchemy import desc, func
+from sqlalchemy import desc, func, or_, and_
 from sqlalchemy.orm import Session
 
 from models.operational_analysis import OperationalAnalysis
@@ -99,7 +99,20 @@ class DashboardRepository:
             .outerjoin(u_oa, u_oa.c.id == OperationalAnalysis.customer_id)
             .outerjoin(u_t, u_t.c.id == tickets_table.c.created_by)
             .filter(
-                OperationalAnalysis.escalation_risk_band.in_(["critical", "high"])
+                OperationalAnalysis.risk_processed == True,
+                or_(
+                    func.upper(func.coalesce(OperationalAnalysis.escalation_risk_band, "")).in_(["HIGH", "CRITICAL"]),
+                    and_(
+                        func.coalesce(OperationalAnalysis.repeat_count, 0) >= 1,
+                        func.lower(func.coalesce(OperationalAnalysis.resolution_state, "")).notin_([
+                            "resolved",
+                            "closed",
+                            "auto_closed",
+                            "auto-closed",
+                            "cancelled"
+                        ])
+                    )
+                )
             )
             .order_by(desc(OperationalAnalysis.captured_at))
             .limit(limit)

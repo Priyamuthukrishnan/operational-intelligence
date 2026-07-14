@@ -39,6 +39,14 @@ class RecentEscalation(BaseModel):
     escalation_risk_score: float = Field(..., description="Escalation risk probability")
     escalation_risk_band: str = Field(..., description="Risk band: high or critical")
     query_summary: Optional[str] = Field(None, description="Query summary statement")
+    repeat_count: Optional[int] = Field(
+        default=None,
+        description="Number of times this issue has been repeated"
+    )
+    resolution_state: Optional[str] = Field(
+        default=None,
+        description="Current lifecycle resolution state of the ticket"
+    )
     captured_at: datetime = Field(..., description="Timestamp event was captured")
 
 

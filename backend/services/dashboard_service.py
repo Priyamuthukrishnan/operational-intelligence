@@ -61,6 +61,8 @@ class DashboardService:
                 escalation_risk_score=e.escalation_risk_score or 0.0,
                 escalation_risk_band=e.escalation_risk_band or "high",
                 query_summary=e.query_summary,
+                repeat_count=e.repeat_count,
+                resolution_state=e.resolution_state,
                 captured_at=e.captured_at,
             )
             for e, ticket_key, customer_name in escalations
