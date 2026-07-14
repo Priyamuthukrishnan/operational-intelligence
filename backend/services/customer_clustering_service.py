@@ -49,6 +49,92 @@ from schemas.clustering import (
 
 logger = setup_logger(__name__)
 
+from sqlalchemy import Table, Column, String
+from sqlalchemy.dialects.postgresql import UUID
+from db.base_class import Base
+
+tickets_table = Table(
+    "tickets",
+    Base.metadata,
+    Column("id", UUID(as_uuid=True), primary_key=True),
+    Column("category", String(100)),
+    Column("title", String(255)),
+    Column("description", String(255)),
+    extend_existing=True,
+)
+
+ai_analysis_table = Table(
+    "ai_analysis",
+    Base.metadata,
+    Column("id", UUID(as_uuid=True), primary_key=True),
+    Column("category_prediction", String(100)),
+    extend_existing=True,
+)
+
+CATEGORY_NORMALIZATION = {
+    "access_management": "Access Management",
+    "service_outage": "Service Outage",
+    "user_error": "User Error",
+    "integration_failure": "Integration Failure",
+    "software_bug": "Software Bug",
+    "erp": "ERP",
+    "finance": "Finance",
+    "performance": "Performance",
+    "reporting": "Reporting",
+    "database": "Database",
+    "network": "Network",
+    "general_support": "General Support",
+    "general support": "General Support",
+}
+
+SUBJECT_MAPPING = {
+    "forgot password": "Password Reset Failures",
+    "password reset": "Password Reset Failures",
+    "password": "Password Reset and Login Failures",
+    "login": "Password Reset and Login Failures",
+    "signin": "Password Reset and Login Failures",
+    "sign-in": "Password Reset and Login Failures",
+    "wifi": "WiFi Access and Connectivity Failures",
+    "wi-fi": "WiFi Access and Connectivity Failures",
+    "blue screen": "System Blue Screen Failures",
+    "bsod": "System Blue Screen Failures",
+    "inventory": "Inventory Synchronization Failures",
+    "overselling": "Inventory Synchronization Failures",
+    "wms": "Inventory Synchronization Failures",
+    "erp": "ERP Integration Failures",
+    "invoice": "Invoice Tax Calculation Issues",
+    "tax": "Invoice Tax Calculation Issues",
+    "admin dashboard": "Admin Dashboard Access Issues",
+    "dashboard": "Dashboard Access Issues",
+    "access": "Access Authorization Issues",
+    "permission": "Access Authorization Issues",
+    "report": "Report Generation Failures",
+    "reporting": "Report Generation Failures",
+    "database": "Database Performance Issues",
+    "sql": "Database Performance Issues",
+    "query": "Database Performance Issues",
+    "slow": "System Performance Degradation",
+    "performance": "System Performance Degradation",
+    "network": "Network Connection Failures",
+    "connection": "Network Connection Failures",
+    "outage": "Service Outage and Downtime",
+    "down": "Service Outage and Downtime",
+}
+
+def _normalize_category(cat: str | None) -> str:
+    if not cat:
+        return "General Support"
+    cat_clean = cat.strip().lower().replace("_", " ").replace("-", " ")
+    if cat_clean in CATEGORY_NORMALIZATION:
+        return CATEGORY_NORMALIZATION[cat_clean]
+    
+    cat_lower = cat.strip().lower()
+    for k, v in CATEGORY_NORMALIZATION.items():
+        if k.lower() == cat_lower:
+            return v
+            
+    return cat.strip().title()
+
 
 # ── Union-Find (Disjoint Set) for Issue Cluster Deduplication ────────────
 
@@ -1105,6 +1191,33 @@ class CustomerClusteringService:
         if vectors_available > 0 and issue_clusters:
             try:
                 active_member_ids = []
+                
+                # Query category and ticket details for all interactions of this customer to avoid N+1 queries
+                category_rows = (
+                    self._db.query(
+                        OperationalAnalysis.id,
+                        tickets_table.c.category,
+                        ai_analysis_table.c.category_prediction,
+                        OperationalAnalysis.root_cause_category,
+                        tickets_table.c.title,
+                        tickets_table.c.description
+                    )
+                    .outerjoin(tickets_table, tickets_table.c.id == OperationalAnalysis.ticket_id)
+                    .outerjoin(ai_analysis_table, ai_analysis_table.c.id == OperationalAnalysis.ai_analysis_id)
+                    .filter(OperationalAnalysis.customer_id == customer_id)
+                    .all()
+                )
+                
+                interaction_meta = {}
+                for row in category_rows:
+                    interaction_meta[row[0]] = {
+                        "ticket_category": row[1],
+                        "ai_category": row[2],
+                        "root_cause": row[3],
+                        "title": row[4],
+                        "description": row[5]
+                    }
+
                 for cluster in issue_clusters:
                     if cluster.interaction_count > 1:
                         # 1. Generate deterministic UUID v5 from sorted interaction IDs
@@ -1113,35 +1226,105 @@ class CustomerClusteringService:
                         det_cluster_id = uuid.uuid5(uuid.NAMESPACE_DNS, f"cluster-{concat_ids}")
                         cluster.cluster_id = det_cluster_id
                         
-                        # 2. Extract timestamps and categories
+                        # 2. Extract timestamps
                         cluster_interactions = [i for i in interactions if i.id in cluster.interaction_ids]
                         first_seen = min((i.captured_at for i in cluster_interactions if i.captured_at is not None), default=None)
                         last_seen = max((i.captured_at for i in cluster_interactions if i.captured_at is not None), default=None)
                         
-                        # Try to find a valid root cause category
+                        # Try to find a valid root cause category to satisfy foreign key validation
                         root_cause = None
                         for i in cluster_interactions:
                             if i.root_cause_category:
-                                # Validate against root_cause_taxonomy table to avoid foreign key violation
                                 from models.issue_cluster import RootCauseTaxonomy
                                 exists = self._db.query(RootCauseTaxonomy).filter_by(category=i.root_cause_category).first()
                                 if exists:
                                     root_cause = i.root_cause_category
                                     break
-
+                                    
+                        # Determine dominant category using source priority:
+                        # 1. ai_analysis.category_prediction
+                        # 2. tickets.category
+                        # 3. operational_analysis.root_cause_category
+                        # 4. Service Intelligence keyword fallback
+                        # 5. "General Support"
+                        category_candidates = []
+                        for member_id in cluster.interaction_ids:
+                            meta = interaction_meta.get(member_id, {})
+                            ai_cat = meta.get("ai_category")
+                            ticket_cat = meta.get("ticket_category")
+                            oa_cat = meta.get("root_cause")
+                            title = meta.get("title")
+                            desc = meta.get("description")
+                            
+                            cand = None
+                            if ai_cat and ai_cat.strip():
+                                cand = ai_cat.strip()
+                            elif ticket_cat and ticket_cat.strip():
+                                cand = ticket_cat.strip()
+                            elif oa_cat and oa_cat.strip():
+                                cand = oa_cat.strip()
+                            else:
+                                text_content = f"{title or ''} {desc or ''}".lower()
+                                for kw, cat in {
+                                    "erp": "ERP",
+                                    "finance": "Finance",
+                                    "billing": "Finance",
+                                    "invoice": "Finance",
+                                    "tax": "Finance",
+                                    "auth": "Access Management",
+                                    "login": "Access Management",
+                                    "password": "Access Management",
+                                    "access": "Access Management",
+                                    "permission": "Access Management",
+                                    "report": "Reporting",
+                                    "db": "Database",
+                                    "database": "Database",
+                                    "network": "Network",
+                                    "performance": "Performance",
+                                    "outage": "Service Outage",
+                                    "down": "Service Outage",
+                                }.items():
+                                    if kw in text_content:
+                                        cand = cat
+                                        break
+                            if cand:
+                                category_candidates.append(cand)
+                                
+                        dominant_category = None
+                        if category_candidates:
+                            from collections import Counter
+                            counts = Counter(category_candidates)
+                            dominant_category = counts.most_common(1)[0][0]
+                            
+                        issue_cat = _normalize_category(dominant_category)
                         
-                        # Use root cause or first non-null query summary as issue category
-                        issue_cat = root_cause
-                        if not issue_cat:
-                            for i in cluster_interactions:
-                                if i.query_summary:
-                                    issue_cat = i.query_summary[:100]  # truncate to fit column
-                                    break
-
+                        # Generate concise cluster name based on common keyword matches
+                        subject_hits = Counter()
+                        sorted_subjects = sorted(SUBJECT_MAPPING.keys(), key=len, reverse=True)
+                        for member_id in cluster.interaction_ids:
+                            meta = interaction_meta.get(member_id, {})
+                            title = (meta.get("title") or "").strip().lower()
+                            if title:
+                                for kw in sorted_subjects:
+                                    if kw in title:
+                                        subject_hits[SUBJECT_MAPPING[kw]] += 1
+                                        break
+                                        
+                        if subject_hits:
+                            cluster_name = subject_hits.most_common(1)[0][0]
+                        else:
+                            rc_list = [interaction_meta.get(mid, {}).get("root_cause") for mid in cluster.interaction_ids]
+                            rc_candidates = [r for r in rc_list if r]
+                            rc_dominant = Counter(rc_candidates).most_common(1)[0][0] if rc_candidates else "General"
+                            rc_clean = rc_dominant.replace("_", " ").title()
+                            cluster_name = f"{rc_clean} {issue_cat} Issues"
+                            
+                        cluster.cluster_label = cluster_name
+                        
                         # 3. Upsert issue cluster record
                         self._repository.upsert_issue_cluster(
                             cluster_id=det_cluster_id,
-                            cluster_name=cluster.cluster_label,
+                            cluster_name=cluster_name,
                             issue_category=issue_cat,
                             root_cause_category=root_cause,
                             frequency_count=cluster.interaction_count,
