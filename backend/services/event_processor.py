@@ -107,6 +107,7 @@ class EventProcessor:
                 {"id": request.ticket_id}
             ).mappings().first()
 
+            ticket_status = None
             if sub_ticket_row:
                 canonical_ticket_id = sub_ticket_row["ticket_id"]
                 if not canonical_ticket_id:
@@ -114,9 +115,15 @@ class EventProcessor:
                         status_code=404,
                         detail=f"Sub-ticket {request.ticket_id} has no associated main ticket.",
                     )
+                # Retrieve parent ticket's current status
+                parent_ticket_row = self._db.execute(
+                    text("SELECT status FROM tickets WHERE id = :id"),
+                    {"id": canonical_ticket_id}
+                ).mappings().first()
+                ticket_status = parent_ticket_row["status"] if parent_ticket_row else None
             else:
                 ticket_row = self._db.execute(
-                    text("SELECT id FROM tickets WHERE id = :id"),
+                    text("SELECT id, status FROM tickets WHERE id = :id"),
                     {"id": request.ticket_id}
                 ).mappings().first()
                 if not ticket_row:
@@ -125,6 +132,7 @@ class EventProcessor:
                         detail=f"Ticket {request.ticket_id} not found in database.",
                     )
                 canonical_ticket_id = ticket_row["id"]
+                ticket_status = ticket_row["status"]
 
             # 2. Concurrency-Safe Advisory Lock Key
             import hashlib
@@ -151,6 +159,17 @@ class EventProcessor:
                 sorted_rows = sorted(rows, key=sort_key)
                 record = sorted_rows[0]
                 logger.info("Selected existing canonical operational analysis record: id=%s", record.id)
+                # Update resolution_state with current ticket status
+                record.resolution_state = ticket_status
+                # Link ai_analysis_id if still missing
+                if record.ai_analysis_id is None:
+                    ai_row = self._db.execute(
+                        text("SELECT id FROM ai_analysis WHERE ticket_id = :tid LIMIT 1"),
+                        {"tid": canonical_ticket_id}
+                    ).mappings().first()
+                    if ai_row:
+                        record.ai_analysis_id = ai_row["id"]
+                self._db.flush()
             else:
                 # Resolve customer_id from tickets
                 ticket_creator_row = self._db.execute(
@@ -159,10 +178,19 @@ class EventProcessor:
                 ).mappings().first()
                 customer_id = ticket_creator_row["created_by"] if ticket_creator_row else None
 
+                # Link ai_analysis if available
+                ai_row = self._db.execute(
+                    text("SELECT id FROM ai_analysis WHERE ticket_id = :tid LIMIT 1"),
+                    {"tid": canonical_ticket_id}
+                ).mappings().first()
+                ai_analysis_id = ai_row["id"] if ai_row else None
+
                 # Create new record
                 record = OperationalAnalysis(
                     ticket_id=canonical_ticket_id,
                     customer_id=customer_id,
+                    ai_analysis_id=ai_analysis_id,
+                    resolution_state=ticket_status,
                     risk_processed=False
                 )
                 self._db.add(record)
@@ -193,6 +221,7 @@ class EventProcessor:
                 status="success",
                 message="Event captured successfully",
                 operational_analysis_id=operational_id,
+                ticket_status=ticket_status,
             )
 
         except Exception:

@@ -73,26 +73,9 @@ def _fetch_ticket_signals(
             exc_info=True,
         )
 
-    try:
-        recommendation_row = session.execute(
-            text(
-                """
-                SELECT recommendation_source
-                FROM recommendations
-                WHERE ticket_id = :ticket_id
-                ORDER BY created_at DESC NULLS LAST
-                LIMIT 1
-                """
-            ),
-            {"ticket_id": ticket_id},
-        ).mappings().first()
-        if recommendation_row is not None:
-            payload["recommendation_source"] = recommendation_row["recommendation_source"]
-    except Exception:
-        logger.warning(
-            "Unable to load recommendation signals for ticket_id=%s", ticket_id,
-            exc_info=True,
-        )
+    # Bypassed: recommendations table does not exist in production schema.
+    # Risk scorer handles recommendation_source=None via existing fallback.
+    payload["recommendation_source"] = None
 
     try:
         approval_row = session.execute(

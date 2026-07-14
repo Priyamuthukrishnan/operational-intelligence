@@ -1122,8 +1122,13 @@ class CustomerClusteringService:
                         root_cause = None
                         for i in cluster_interactions:
                             if i.root_cause_category:
-                                root_cause = i.root_cause_category
-                                break
+                                # Validate against root_cause_taxonomy table to avoid foreign key violation
+                                from models.issue_cluster import RootCauseTaxonomy
+                                exists = self._db.query(RootCauseTaxonomy).filter_by(category=i.root_cause_category).first()
+                                if exists:
+                                    root_cause = i.root_cause_category
+                                    break
+
                         
                         # Use root cause or first non-null query summary as issue category
                         issue_cat = root_cause
