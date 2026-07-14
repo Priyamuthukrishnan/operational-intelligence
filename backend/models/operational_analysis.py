@@ -20,7 +20,7 @@ class OperationalAnalysis(Base):
         comment="Auto-generated UUID primary key",
     )
 
-    ai_analysis_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    ai_analysis_id = Column(UUID(as_uuid=True), nullable=True, index=True)
     ticket_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     customer_id = Column(UUID(as_uuid=True), nullable=True, index=True)
     comment_id = Column(UUID(as_uuid=True), nullable=True)

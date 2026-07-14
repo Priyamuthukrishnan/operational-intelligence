@@ -61,3 +61,7 @@ class EventCaptureResponse(BaseModel):
     operational_analysis_id: str = Field(
         ..., description="Generated UUID of the persisted analytics record"
     )
+    ticket_status: Optional[str] = Field(
+        None, description="Current lifecycle status of the resolved ticket"
+    )
+

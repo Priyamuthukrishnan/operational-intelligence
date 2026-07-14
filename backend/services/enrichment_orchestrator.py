@@ -29,6 +29,7 @@ from intelligence.root_cause import RootCauseEngine
 from embeddings.generator import EmbeddingGenerator
 from services.qdrant_service import QdrantService
 from services.embedding_client import EmbeddingClient
+from utils.date_helpers import ensure_utc
 
 logger = setup_logger(__name__)
 
@@ -376,73 +377,65 @@ class EnrichmentOrchestrator:
                 if sa["confidence_score"] is not None:
                     risk_signals["ai_confidences"].append(float(sa["confidence_score"]))
 
-            # Attempt to query recommendations table (non-existent, handles fallback cleanly)
-            try:
-                recommendation_row = self.db.execute(
-                    text("""
-                        SELECT recommendation_source
-                        FROM recommendations
-                        WHERE ticket_id = :ticket_id
-                        ORDER BY created_at DESC NULLS LAST
-                        LIMIT 1
-                    """),
-                    {"ticket_id": record.ticket_id},
-                ).mappings().first()
-                if recommendation_row:
-                    risk_signals["recommendation_source"] = recommendation_row["recommendation_source"]
-            except Exception:
-                logger.warning("recommendations table is unavailable (expected database architecture detail)")
+            # Bypassed: recommendations table does not exist in production.
+            # recommendation_source defaults to None; risk scorer uses its fallback.
 
+            # Wrap approval_history query in nested savepoint to prevent
+            # a table-not-found error from aborting the outer transaction.
             try:
-                approval_row = self.db.execute(
-                    text("""
-                        SELECT action
-                        FROM approval_history
-                        WHERE ticket_id = :ticket_id
-                        ORDER BY created_at DESC NULLS LAST
-                        LIMIT 1
-                    """),
-                    {"ticket_id": record.ticket_id},
-                ).mappings().first()
-                if approval_row:
-                    risk_signals["approval_action"] = approval_row["action"]
+                with self.db.begin_nested():
+                    approval_row = self.db.execute(
+                        text("""
+                            SELECT action
+                            FROM approval_history
+                            WHERE ticket_id = :ticket_id
+                            ORDER BY created_at DESC NULLS LAST
+                            LIMIT 1
+                        """),
+                        {"ticket_id": record.ticket_id},
+                    ).mappings().first()
+                    if approval_row:
+                        risk_signals["approval_action"] = approval_row["action"]
             except Exception:
                 logger.warning("Unable to load approval history for ticket_id=%s", record.ticket_id)
 
-            # Calculate latest_activity_at dynamically across the entire issue chain
+            # Calculate latest_activity_at — normalise all datetimes to UTC
             timestamps = []
             if main_ticket["updated_at"]:
-                timestamps.append(main_ticket["updated_at"])
+                timestamps.append(ensure_utc(main_ticket["updated_at"]))
             elif main_ticket["created_at"]:
-                timestamps.append(main_ticket["created_at"])
+                timestamps.append(ensure_utc(main_ticket["created_at"]))
             
             for st in sub_tickets:
                 if st["updated_at"]:
-                    timestamps.append(st["updated_at"])
+                    timestamps.append(ensure_utc(st["updated_at"]))
                 elif st["created_at"]:
-                    timestamps.append(st["created_at"])
+                    timestamps.append(ensure_utc(st["created_at"]))
 
             for c in main_comments:
                 if c["created_at"]:
-                    timestamps.append(c["created_at"])
+                    timestamps.append(ensure_utc(c["created_at"]))
 
             for sc in sub_comments:
                 if sc["created_at"]:
-                    timestamps.append(sc["created_at"])
+                    timestamps.append(ensure_utc(sc["created_at"]))
 
             try:
-                approval_rows = self.db.execute(
-                    text("SELECT created_at FROM approval_history WHERE ticket_id = :ticket_id"),
-                    {"ticket_id": record.ticket_id}
-                ).mappings().all()
-                for ar in approval_rows:
-                    if ar["created_at"]:
-                        timestamps.append(ar["created_at"])
+                with self.db.begin_nested():
+                    approval_rows = self.db.execute(
+                        text("SELECT created_at FROM approval_history WHERE ticket_id = :ticket_id"),
+                        {"ticket_id": record.ticket_id}
+                    ).mappings().all()
+                    for ar in approval_rows:
+                        if ar["created_at"]:
+                            timestamps.append(ensure_utc(ar["created_at"]))
             except Exception:
                 pass
 
             if timestamps:
-                risk_signals["latest_activity_at"] = max(timestamps)
+                valid_timestamps = [ts for ts in timestamps if ts is not None]
+                if valid_timestamps:
+                    risk_signals["latest_activity_at"] = max(valid_timestamps)
 
             ticket_history = self.repository.get_ticket_history(record.ticket_id)
             risk_result = compute_escalation_risk(
@@ -539,6 +532,8 @@ class EnrichmentOrchestrator:
             # Step 8: Update PostgreSQL record via repository
             update_data = {
                 "customer_id": customer_id,
+                "resolution_state": main_ticket["status"],
+                "ai_analysis_id": main_ai["id"] if (main_ai and record.ai_analysis_id is None) else record.ai_analysis_id,
                 "query_summary": query_summary,
                 "response_summary": response_summary,
                 "sentiment_label": sentiment_label,

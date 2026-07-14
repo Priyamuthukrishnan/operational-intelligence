@@ -9,6 +9,21 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 
+def ensure_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    """Ensure a datetime is offset-aware and in UTC.
+
+    Naive datetimes are treated as UTC (consistent with PostgreSQL
+    ``TIMESTAMP WITHOUT TIME ZONE`` columns in this project).
+    Aware datetimes are converted to UTC.
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+
 def get_daily_key(dt: Optional[datetime]) -> str:
     """Format a datetime as daily key: YYYY-MM-DD."""
     if dt is None:
