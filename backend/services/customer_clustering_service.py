@@ -1509,8 +1509,21 @@ class CustomerClusteringService:
                 )
                 
                 # Commit changes
-                self._db.commit()
-                persisted = True
+                logger.info("Saving OperationalAnalysis...")
+                self._db.flush()
+                logger.info("OperationalAnalysis saved successfully.")
+
+                try:
+                    from services.aggregation_service import AggregationService
+                    aggregation_service = AggregationService(self._db)
+                    aggregation_service.generate_all_rollups()
+                    self._db.commit()
+                    logger.info("Transaction committed successfully.")
+                    persisted = True
+                except Exception as exc:
+                    self._db.rollback()
+                    logger.error("Clustering rollup regeneration failed: %s", exc)
+                    raise exc
                 logger.info("Successfully committed issue cluster persistence for customer_id=%s", customer_id)
             except Exception as exc:
                 self._db.rollback()

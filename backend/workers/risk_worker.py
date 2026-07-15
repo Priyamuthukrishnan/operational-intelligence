@@ -178,7 +178,20 @@ def process_ticket_risk(
                 "risk_processed": True,
             },
         )
-        session.commit()
+        logger.info("Saving OperationalAnalysis...")
+        session.flush()
+        logger.info("OperationalAnalysis saved successfully.")
+
+        try:
+            from services.aggregation_service import AggregationService
+            aggregation_service = AggregationService(session)
+            aggregation_service.generate_all_rollups()
+            session.commit()
+            logger.info("Transaction committed successfully.")
+        except Exception as exc:
+            session.rollback()
+            logger.error("Risk worker rollup regeneration failed: %s", exc)
+            raise exc
 
         logger.info(
             "Risk computed for ticket_id=%s raw_score=%s signal_scores=%s multiplier=%s final_score=%s risk_band=%s",

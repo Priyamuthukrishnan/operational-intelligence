@@ -555,8 +555,16 @@ class EnrichmentOrchestrator:
             logger.info("Updating OperationalAnalysis record fields in PostgreSQL")
             self.repository.update(operational_analysis_id, update_data)
 
-            # Commit the enrichment changes
+            logger.info("Saving OperationalAnalysis...")
+            self.db.flush()
+            logger.info("OperationalAnalysis saved successfully.")
+
+            # Automatically run rollup regeneration and commit
+            from services.aggregation_service import AggregationService
+            aggregation_service = AggregationService(self.db)
+            aggregation_service.generate_all_rollups()
             self.db.commit()
+            logger.info("Transaction committed successfully.")
             logger.info(
                 "Enrichment successfully persisted for operational_analysis_id=%s",
                 operational_analysis_id,

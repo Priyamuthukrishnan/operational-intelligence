@@ -194,12 +194,16 @@ class EventProcessor:
                     risk_processed=False
                 )
                 self._db.add(record)
-                self._db.flush()
-                self._db.refresh(record)
-                logger.info("Created new canonical operational analysis record: id=%s", record.id)
+            logger.info("Saving OperationalAnalysis...")
+            self._db.flush()
+            logger.info("OperationalAnalysis saved successfully.")
 
-            # Commit the transaction (releases the advisory lock)
+            # Automatically run rollup regeneration and commit
+            from services.aggregation_service import AggregationService
+            aggregation_service = AggregationService(self._db)
+            aggregation_service.generate_all_rollups()
             self._db.commit()
+            logger.info("Transaction committed successfully.")
 
             operational_id = str(record.id)
 
@@ -224,12 +228,12 @@ class EventProcessor:
                 ticket_status=ticket_status,
             )
 
-        except Exception:
+        except Exception as exc:
             self._db.rollback()
             logger.exception(
                 "Unexpected error while capturing event for ticket_id=%s",
                 request.ticket_id,
             )
-            raise
+            raise exc
 
 

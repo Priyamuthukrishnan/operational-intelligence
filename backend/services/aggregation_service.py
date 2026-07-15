@@ -30,9 +30,14 @@ class AggregationService:
         Returns:
             The total number of rollup records updated or created.
         """
-        logger.info("Starting aggregation run to rebuild ticket rollups")
+        logger.info("Starting rollup regeneration...")
 
-        # 1. Retrieve all interaction records
+        # 1. Clear existing ticket_rollups to avoid stale records
+        self.db.query(TicketRollup).delete()
+        self.db.flush()
+        logger.info("Cleared existing ticket_rollups.")
+
+        # 2. Retrieve all interaction records
         interactions = (
             self.db.query(OperationalAnalysis)
             .order_by(OperationalAnalysis.captured_at.asc())
@@ -41,6 +46,11 @@ class AggregationService:
 
         if not interactions:
             logger.info("No interaction records found. Rollup aggregation skipped.")
+            logger.info("Generated:")
+            logger.info("  Daily: 0")
+            logger.info("  Weekly: 0")
+            logger.info("  Monthly: 0")
+            logger.info("Rollup regeneration completed.")
             return 0
 
         # Define granularities
@@ -51,6 +61,7 @@ class AggregationService:
         ]
 
         total_upserted = 0
+        rollup_counts = {"daily": 0, "weekly": 0, "monthly": 0}
 
         for granularity, key_fn in granularities:
             # Group interactions by key
@@ -117,59 +128,31 @@ class AggregationService:
                     else None
                 )
 
-                # Upsert Rollup Record
-                rollup_record = (
-                    self.db.query(TicketRollup)
-                    .filter(
-                        TicketRollup.period_label == period_label,
-                        TicketRollup.granularity == granularity,
-                    )
-                    .first()
+                # Create and add new rollup record
+                logger.debug(
+                    "Creating new rollup period_label=%s granularity=%s",
+                    period_label,
+                    granularity,
                 )
-
-                if rollup_record:
-                    logger.debug(
-                        "Updating existing rollup period_label=%s granularity=%s",
-                        period_label,
-                        granularity,
-                    )
-                    rollup_record.interaction_count = interaction_count
-                    rollup_record.ticket_count = ticket_count
-                    rollup_record.resolved_ticket_count = resolved_ticket_count
-                    rollup_record.resolution_rate = resolution_rate
-                    rollup_record.average_sentiment = avg_sentiment
-                    rollup_record.average_escalation_risk = avg_risk
-                    rollup_record.critical_escalation_count = critical_count
-                    rollup_record.updated_at = datetime.now(timezone.utc)
-                else:
-                    logger.debug(
-                        "Creating new rollup period_label=%s granularity=%s",
-                        period_label,
-                        granularity,
-                    )
-                    rollup_record = TicketRollup(
-                        period_label=period_label,
-                        granularity=granularity,
-                        interaction_count=interaction_count,
-                        ticket_count=ticket_count,
-                        resolved_ticket_count=resolved_ticket_count,
-                        resolution_rate=resolution_rate,
-                        average_sentiment=avg_sentiment,
-                        average_escalation_risk=avg_risk,
-                        critical_escalation_count=critical_count,
-                    )
-                    self.db.add(rollup_record)
+                rollup_record = TicketRollup(
+                    period_label=period_label,
+                    granularity=granularity,
+                    interaction_count=interaction_count,
+                    ticket_count=ticket_count,
+                    resolved_ticket_count=resolved_ticket_count,
+                    resolution_rate=resolution_rate,
+                    average_sentiment=avg_sentiment,
+                    average_escalation_risk=avg_risk,
+                    critical_escalation_count=critical_count,
+                )
+                self.db.add(rollup_record)
 
                 total_upserted += 1
+                rollup_counts[granularity] += 1
 
-        try:
-            self.db.commit()
-            logger.info(
-                "Aggregation run finished. Successfully upserted %d rollup records.",
-                total_upserted,
-            )
-            return total_upserted
-        except Exception as e:
-            self.db.rollback()
-            logger.error("Failed to commit rollup aggregations to DB: %s", e)
-            raise
+        logger.info("Generated:")
+        logger.info(f"  Daily: {rollup_counts['daily']}")
+        logger.info(f"  Weekly: {rollup_counts['weekly']}")
+        logger.info(f"  Monthly: {rollup_counts['monthly']}")
+        logger.info("Rollup regeneration completed.")
+        return total_upserted

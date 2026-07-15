@@ -105,11 +105,13 @@ def refresh_trends(
     try:
         service = AggregationService(db)
         count = service.generate_all_rollups()
+        db.commit()
         return {
             "status": "success",
             "message": f"Aggregation rollups generated successfully. Total records processed: {count}",
         }
     except Exception as exc:
+        db.rollback()
         logger.exception("Error running trend rollup aggregation")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

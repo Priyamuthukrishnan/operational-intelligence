@@ -71,3 +71,4 @@ class OperationalAnalysis(Base):
             f"ticket={self.ticket_id}, "
             f"customer={self.customer_id})>"
         )
+
