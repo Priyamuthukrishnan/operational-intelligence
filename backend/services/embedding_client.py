@@ -127,7 +127,7 @@ class EmbeddingClient:
             The vector/document ID string returned by the embedding service,
             or ``None`` if ingestion failed.
         """
-        if not self.is_available:
+        if self._client is None:
             logger.warning("EmbeddingClient unavailable — skipping ingest")
             return None
 
@@ -240,7 +240,7 @@ class EmbeddingClient:
             A list of match dicts from the embedding service response,
             or an empty list on failure.
         """
-        if not self.is_available:
+        if self._client is None:
             logger.warning("EmbeddingClient unavailable — skipping search")
             return []
 
@@ -272,7 +272,8 @@ class EmbeddingClient:
             if isinstance(data, list):
                 results = data
             elif isinstance(data, dict):
-                results = data.get("results", data.get("matches", []))
+                results_val = data.get("results") or data.get("matches") or []
+                results = results_val if isinstance(results_val, list) else []
             else:
                 results = []
 

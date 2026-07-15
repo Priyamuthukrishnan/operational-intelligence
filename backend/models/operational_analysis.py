@@ -1,8 +1,9 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.orm import Mapped, mapped_column
 
 from db.base_class import Base
 
@@ -12,7 +13,7 @@ class OperationalAnalysis(Base):
 
     __tablename__ = "operational_analysis"
 
-    id = Column(
+    id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
         default=uuid.uuid4,
@@ -20,42 +21,42 @@ class OperationalAnalysis(Base):
         comment="Auto-generated UUID primary key",
     )
 
-    ai_analysis_id = Column(UUID(as_uuid=True), nullable=True, index=True)
-    ticket_id = Column(UUID(as_uuid=True), nullable=False, index=True)
-    customer_id = Column(UUID(as_uuid=True), nullable=True, index=True)
-    comment_id = Column(UUID(as_uuid=True), nullable=True)
+    ai_analysis_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    ticket_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    customer_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    comment_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
 
     # Snapshot fields used by the risk escalation layer.
-    source_used = Column(String(20), nullable=True)
-    assigned_agent_id = Column(UUID(as_uuid=True), nullable=True)
-    assigned_manager_id = Column(UUID(as_uuid=True), nullable=True)
-    resolution_state = Column(String(20), nullable=True)
+    source_used: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    assigned_agent_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    assigned_manager_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    resolution_state: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
-    query_summary = Column(Text, nullable=True)
-    response_summary = Column(Text, nullable=True)
+    query_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    response_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    sentiment_label = Column(Text, nullable=True)
-    sentiment_score = Column(Float, nullable=True)
+    sentiment_label: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sentiment_score: Mapped[float | None] = mapped_column(Float, nullable=True)
 
-    escalation_risk_score = Column(Float, nullable=True)
-    escalation_risk_band = Column(Text, nullable=True)
+    escalation_risk_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    escalation_risk_band: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    root_cause_category = Column(Text, nullable=True)
-    root_cause_confidence = Column(Float, nullable=True)
+    root_cause_category: Mapped[str | None] = mapped_column(Text, nullable=True)
+    root_cause_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
 
-    repeat_count = Column(Integer, nullable=True)
-    cluster_id = Column(UUID(as_uuid=True), nullable=True, index=True)
-    qdrant_vector_id = Column(Text, nullable=True)
+    repeat_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cluster_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    qdrant_vector_id: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Risk processing state.
-    confidence_decay_score = Column(Float, nullable=True)
-    momentum_score = Column(Float, nullable=True)
-    risk_multiplier = Column(Float, nullable=True)
-    risk_reason = Column(JSONB, nullable=True)
-    risk_processed = Column(Boolean, default=False, nullable=False)
+    confidence_decay_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    momentum_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    risk_multiplier: Mapped[float | None] = mapped_column(Float, nullable=True)
+    risk_reason: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    risk_processed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
-    model_version = Column(Text, nullable=True)
-    captured_at = Column(
+    model_version: Mapped[str | None] = mapped_column(Text, nullable=True)
+    captured_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         nullable=False,

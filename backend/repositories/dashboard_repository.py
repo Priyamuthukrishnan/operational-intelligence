@@ -6,7 +6,7 @@ Abstractions and database query wrappers for compiling aggregated statistics fro
 from __future__ import annotations
 
 import uuid
-from typing import Any, Optional
+from typing import Any, Optional, cast
 from sqlalchemy import desc, func, or_, and_
 from sqlalchemy.orm import Session
 
@@ -73,12 +73,24 @@ class DashboardRepository:
             .scalar()
         ) or 0
 
+        if res is None:
+            return {
+                "total_interactions": 0,
+                "total_tickets": 0,
+                "resolved_tickets": resolved_count,
+                "average_sentiment": None,
+                "average_escalation_risk": None,
+                "critical_escalations_count": critical_count,
+            }
+
+        avg_sentiment: Any = res.avg_sentiment
+        avg_risk: Any = res.avg_risk
         return {
             "total_interactions": res.total_interactions or 0,
             "total_tickets": res.total_tickets or 0,
             "resolved_tickets": resolved_count,
-            "average_sentiment": float(res.avg_sentiment) if res.avg_sentiment is not None else None,
-            "average_escalation_risk": float(res.avg_risk) if res.avg_risk is not None else None,
+            "average_sentiment": float(avg_sentiment) if avg_sentiment is not None else None,
+            "average_escalation_risk": float(avg_risk) if avg_risk is not None else None,
             "critical_escalations_count": critical_count,
         }
 
@@ -89,7 +101,8 @@ class DashboardRepository:
         u_oa = users_table.alias("u_oa")
         u_t = users_table.alias("u_t")
         customer_name_expr = func.coalesce(u_oa.c.name, u_t.c.name).label("customer_name")
-        return (
+        return cast(
+            list[tuple[OperationalAnalysis, Optional[str], Optional[str]]],
             self.db.query(
                 OperationalAnalysis,
                 tickets_table.c.ticket_key.label("ticket_key"),
@@ -219,7 +232,8 @@ class DashboardRepository:
         self, limit: int = 5
     ) -> list[tuple[CustomerHealth, Optional[str]]]:
         """Fetch customer accounts sorted by lowest health score."""
-        return (
+        return cast(
+            list[tuple[CustomerHealth, Optional[str]]],
             self.db.query(CustomerHealth, users_table.c.name.label("customer_name"))
             .outerjoin(users_table, users_table.c.id == CustomerHealth.customer_id)
             .order_by(CustomerHealth.health_score.asc())

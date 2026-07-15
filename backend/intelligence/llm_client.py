@@ -41,9 +41,9 @@ class LLMClient:
         if self._api_key:
             try:
                 try:
-                    from mistralai import Mistral
+                    from mistralai import Mistral  # type: ignore
                 except ImportError:
-                    from mistralai.client import Mistral
+                    from mistralai.client import Mistral  # type: ignore
 
                 self._client = Mistral(api_key=self._api_key)
                 logger.info(
@@ -97,7 +97,7 @@ class LLMClient:
             The stripped response text, or ``None`` if the client is
             unavailable or the call fails.
         """
-        if not self.is_available:
+        if self._client is None:
             return None
 
         try:

@@ -9,52 +9,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
-
-
-# ── Feature Placeholder ─────────────────────────────────────────────────
-
-
-class ClusteringFeaturePlaceholder(BaseModel):
-    """Represents the enrichment feature slots for a single interaction.
-
-    Each field corresponds to an intelligence module output. Fields remain
-    ``None`` until the respective upstream module populates them.
-    """
-
-    interaction_id: uuid.UUID = Field(
-        ..., description="Primary key of the OperationalAnalysis record"
-    )
-    ticket_id: uuid.UUID = Field(
-        ..., description="Source ticket identifier"
-    )
-    query_summary: Optional[str] = Field(
-        None, description="AI-generated query summary (populated by Summarization Engine)"
-    )
-    response_summary: Optional[str] = Field(
-        None, description="AI-generated response summary (populated by Summarization Engine)"
-    )
-    sentiment_label: Optional[str] = Field(
-        None, description="Sentiment classification label (populated by Sentiment Engine)"
-    )
-    sentiment_score: Optional[float] = Field(
-        None, description="Sentiment score (populated by Sentiment Engine)"
-    )
-    sentiment_score_out_of_10: Optional[float] = Field(
-        None, description="Sentiment score scaled out of 10"
-    )
-    escalation_risk_score: Optional[float] = Field(
-        None, description="Escalation risk probability (populated by Escalation Risk Engine)"
-    )
-    escalation_risk_score_out_of_10: Optional[float] = Field(
-        None, description="Escalation risk score scaled out of 10"
-    )
-    root_cause_category: Optional[str] = Field(
-        None, description="Predicted root-cause category (populated by Root Cause Engine)"
-    )
-    qdrant_vector_id: Optional[str] = Field(
-        None, description="Vector ID in Qdrant store (populated by Embedding Service)"
-    )
+from pydantic import BaseModel, Field, field_validator
 
 
 # ── Repeat Pattern Metadata ─────────────────────────────────────────────
@@ -76,6 +31,7 @@ class RepeatPatternMetadata(BaseModel):
     )
     distinct_categories: list[str] = Field(
         default_factory=list,
+        examples=[],
         description="Distinct root-cause categories found (excludes None values)",
     )
     earliest_interaction: Optional[datetime] = Field(
@@ -99,9 +55,16 @@ class RepeatPatternMetadata(BaseModel):
         ),
     )
 
+    @field_validator("distinct_categories", mode="before", check_fields=False)
+    @classmethod
+    def validate_distinct_categories(cls, v: Any) -> Any:
+        if isinstance(v, list):
+            from utils.scoring import normalize_category_name
+            return [normalize_category_name(item) for item in v if item is not None]
+        return v
+
 
 # ── Similarity Search Results ────────────────────────────────────────────
-
 
 class SimilarInteraction(BaseModel):
     """A single similarity match returned from Qdrant."""
@@ -110,10 +73,7 @@ class SimilarInteraction(BaseModel):
         ..., description="Qdrant point ID of the matched interaction"
     )
     similarity_score: float = Field(
-        ..., description="Cosine similarity score from Qdrant"
-    )
-    similarity_score_out_of_10: Optional[float] = Field(
-        None, description="Similarity score scaled out of 10"
+        ..., description="Cosine similarity score from Qdrant scaled 0-10"
     )
     payload: Optional[dict[str, Any]] = Field(
         default=None,
@@ -137,13 +97,9 @@ class SimilarityGroup(BaseModel):
     group_size: int = Field(
         ..., description="Number of similar interactions in this group"
     )
-    avg_similarity_score: Optional[float] = Field(
+    similarity_score: Optional[float] = Field(
         None,
-        description="Average similarity score across all matches in this group",
-    )
-    avg_similarity_score_out_of_10: Optional[float] = Field(
-        None,
-        description="Average similarity score scaled out of 10",
+        description="Average similarity score across matches in this group scaled 0-10",
     )
 
 
@@ -161,17 +117,11 @@ class RepeatIssueDetail(BaseModel):
     )
     similarity_scores: list[float] = Field(
         default_factory=list,
-        description="Individual similarity scores of each occurrence",
+        examples=[],
+        description="Individual similarity scores of each occurrence scaled 0-10",
     )
-    similarity_scores_out_of_10: Optional[list[float]] = Field(
-        None,
-        description="Individual similarity scores scaled out of 10",
-    )
-    avg_similarity: Optional[float] = Field(
-        None, description="Average similarity across occurrences"
-    )
-    avg_similarity_out_of_10: Optional[float] = Field(
-        None, description="Average similarity scaled out of 10"
+    similarity_score: Optional[float] = Field(
+        None, description="Average similarity across occurrences scaled 0-10"
     )
 
 
@@ -179,12 +129,7 @@ class RepeatIssueDetail(BaseModel):
 
 
 class CustomerClusterSummary(BaseModel):
-    """Customer-level aggregation of interaction patterns and repeat metrics.
-
-    Provides a single consolidated view of a customer's interaction
-    history, including repeat-issue frequency derived from similarity
-    analysis.
-    """
+    """Customer-level aggregation of interaction patterns and repeat metrics."""
 
     customer_id: uuid.UUID = Field(
         ..., description="The customer identifier"
@@ -205,36 +150,35 @@ class CustomerClusterSummary(BaseModel):
     )
     distinct_categories: list[str] = Field(
         default_factory=list,
+        examples=[],
         description="Distinct root-cause categories found",
     )
-    avg_sentiment_score: Optional[float] = Field(
-        None, description="Average sentiment score across all interactions"
+    sentiment_score: Optional[float] = Field(
+        None, description="Average sentiment score on a 0-10 scale"
     )
-    avg_sentiment_score_out_of_10: Optional[float] = Field(
-        None, description="Average sentiment score scaled out of 10"
-    )
-    avg_escalation_risk: Optional[float] = Field(
-        None, description="Average escalation risk score across all interactions"
-    )
-    avg_escalation_risk_out_of_10: Optional[float] = Field(
-        None, description="Average escalation risk score scaled out of 10"
+    risk_score: Optional[float] = Field(
+        None, description="Average escalation risk score on a 0-10 scale"
     )
     ticket_ids: list[uuid.UUID] = Field(
         default_factory=list,
+        examples=[],
         description="List of distinct ticket UUIDs for this customer",
     )
+
+    @field_validator("distinct_categories", mode="before", check_fields=False)
+    @classmethod
+    def validate_distinct_categories(cls, v: Any) -> Any:
+        if isinstance(v, list):
+            from utils.scoring import normalize_category_name
+            return [normalize_category_name(item) for item in v if item is not None]
+        return v
 
 
 # ── Issue Cluster Group ─────────────────────────────────────────────────
 
 
 class IssueClusterGroup(BaseModel):
-    """A semantically grouped cluster of similar issues.
-
-    Derived from Qdrant nearest-neighbour similarity search with
-    Union-Find deduplication. The ``cluster_label`` is a temporary
-    system-generated identifier, not a final business-readable name.
-    """
+    """A semantically grouped cluster of similar issues."""
 
     cluster_id: Optional[uuid.UUID] = Field(
         default=None,
@@ -242,10 +186,7 @@ class IssueClusterGroup(BaseModel):
     )
     cluster_label: str = Field(
         ...,
-        description=(
-            "Temporary system-generated label (e.g. 'issue_cluster_1'). "
-            "Not a final business-readable cluster name."
-        ),
+        description="Cluster name representing the issue",
     )
     interaction_count: int = Field(
         ..., description="Number of interactions in this cluster"
@@ -253,24 +194,32 @@ class IssueClusterGroup(BaseModel):
     occurrence_count: int = Field(
         ..., description="Total similarity match occurrences across cluster members"
     )
-    avg_similarity_score: Optional[float] = Field(
-        None, description="Average similarity score within this cluster"
-    )
-    avg_similarity_score_out_of_10: Optional[float] = Field(
-        None, description="Average similarity score scaled out of 10"
+    similarity_score: Optional[float] = Field(
+        None, description="Average similarity score within this cluster scaled 0-10"
     )
     root_cause_categories: list[str] = Field(
         default_factory=list,
+        examples=[],
         description="Distinct root-cause categories found within this cluster",
     )
     interaction_ids: list[uuid.UUID] = Field(
         default_factory=list,
+        examples=[],
         description="Primary keys of interactions in this cluster",
     )
     ticket_ids: list[uuid.UUID] = Field(
         default_factory=list,
+        examples=[],
         description="Distinct ticket UUIDs involved in this cluster",
     )
+
+    @field_validator("root_cause_categories", mode="before", check_fields=False)
+    @classmethod
+    def validate_root_cause_categories(cls, v: Any) -> Any:
+        if isinstance(v, list):
+            from utils.scoring import normalize_category_name
+            return [normalize_category_name(item) for item in v if item is not None]
+        return v
 
 
 # ── Time-Based Clustering ───────────────────────────────────────────────
@@ -281,10 +230,7 @@ class TimeBucket(BaseModel):
 
     period_label: str = Field(
         ...,
-        description=(
-            "Human-readable period identifier "
-            "(e.g. '2026-06-23', '2026-W26', '2026-06')"
-        ),
+        description="Human-readable period identifier",
     )
     granularity: str = Field(
         ..., description="Time grouping level: 'daily', 'weekly', or 'monthly'"
@@ -294,16 +240,26 @@ class TimeBucket(BaseModel):
     )
     ticket_ids: list[uuid.UUID] = Field(
         default_factory=list,
+        examples=[],
         description="Distinct ticket UUIDs in this time bucket",
     )
     categories: list[str] = Field(
         default_factory=list,
+        examples=[],
         description="Distinct root-cause categories in this time bucket",
     )
     has_repeat_issues: bool = Field(
         default=False,
         description="Whether repeat-issue patterns were detected in this time window",
     )
+
+    @field_validator("categories", mode="before", check_fields=False)
+    @classmethod
+    def validate_categories(cls, v: Any) -> Any:
+        if isinstance(v, list):
+            from utils.scoring import normalize_category_name
+            return [normalize_category_name(item) for item in v if item is not None]
+        return v
 
 
 class TimeClusterResult(BaseModel):
@@ -325,28 +281,31 @@ class RepeatIssueCluster(BaseModel):
     """A repeat-issue cluster of a customer consisting of a parent ticket and subtickets."""
 
     parent_interaction_id: uuid.UUID = Field(
-        ..., description="The ID of the parent interaction (the earliest occurrence of the issue)"
+        ..., description="The ID of the parent interaction"
     )
     parent_ticket_id: uuid.UUID = Field(
         ..., description="The ticket ID of the parent interaction"
     )
     interaction_count: int = Field(
-        ..., description="Total count of interactions in this cluster (parent + subtickets)"
+        ..., description="Total count of interactions in this cluster"
     )
     subticket_count: int = Field(
-        ..., description="Count of subtickets in this cluster (interaction_count - 1)"
+        ..., description="Count of subtickets in this cluster"
     )
     interaction_ids: list[uuid.UUID] = Field(
         default_factory=list,
+        examples=[],
         description="All interaction UUIDs in the cluster in chronological order"
     )
     ticket_ids: list[uuid.UUID] = Field(
         default_factory=list,
+        examples=[],
         description="All ticket UUIDs in the cluster in chronological order"
     )
     subticket_ids: list[uuid.UUID] = Field(
         default_factory=list,
-        description="Ticket UUIDs of all subtickets in the cluster in chronological order"
+        examples=[],
+        description="Ticket UUIDs of all subtickets in the cluster"
     )
     first_seen: datetime = Field(
         ..., description="Timestamp of the earliest interaction in the cluster"
@@ -354,23 +313,14 @@ class RepeatIssueCluster(BaseModel):
     last_seen: datetime = Field(
         ..., description="Timestamp of the most recent interaction in the cluster"
     )
-    avg_similarity_score: float = Field(
-        ..., description="Average similarity score of the subtickets to the parent ticket"
+    similarity_score: float = Field(
+        ..., description="Average similarity score scaled 0-10"
     )
-    avg_similarity_score_out_of_10: Optional[float] = Field(
-        None, description="Average similarity score scaled out of 10"
+    sentiment_score: Optional[float] = Field(
+        None, description="Average sentiment score on a 0-10 scale"
     )
-    avg_sentiment_score: Optional[float] = Field(
-        None, description="Average sentiment score across all interactions in the cluster"
-    )
-    avg_sentiment_score_out_of_10: Optional[float] = Field(
-        None, description="Average sentiment score scaled out of 10"
-    )
-    avg_escalation_risk: Optional[float] = Field(
-        None, description="Average escalation risk score across all interactions in the cluster"
-    )
-    avg_escalation_risk_out_of_10: Optional[float] = Field(
-        None, description="Average escalation risk score scaled out of 10"
+    risk_score: Optional[float] = Field(
+        None, description="Average escalation risk score on a 0-10 scale"
     )
 
 
@@ -378,12 +328,7 @@ class RepeatIssueCluster(BaseModel):
 
 
 class CustomerClusteringResponse(BaseModel):
-    """Top-level response returned by the customer clustering endpoint.
-
-    All values are populated dynamically from the customer's interaction
-    records, Qdrant similarity search results, and the current state of
-    intelligence module outputs.
-    """
+    """Top-level response returned by the customer clustering endpoint."""
 
     customer_id: uuid.UUID = Field(
         ..., description="The queried customer identifier"
@@ -397,10 +342,7 @@ class CustomerClusteringResponse(BaseModel):
     )
     clusters: list[SimilarityGroup] = Field(
         default_factory=list,
-        description=(
-            "Similarity groups derived from Qdrant nearest-neighbour search. "
-            "Populated when qdrant_vector_id values are available."
-        ),
+        description="Similarity groups derived from Qdrant nearest-neighbour search",
     )
     vectors_available: int = Field(
         default=0,
@@ -412,28 +354,11 @@ class CustomerClusteringResponse(BaseModel):
     )
     repeat_issues: list[RepeatIssueDetail] = Field(
         default_factory=list,
-        description=(
-            "Repeat-issue detection results based on vector similarity. "
-            "Each entry represents a source interaction with similar matches."
-        ),
+        description="Repeat-issue detection results based on vector similarity",
     )
     clustering_ready: bool = Field(
         ...,
-        description=(
-            "Whether all required enrichment dependencies are satisfied. "
-            "Derived at runtime from the customer's interaction data."
-        ),
-    )
-    pending_dependencies: list[str] = Field(
-        default_factory=list,
-        description=(
-            "Intelligence modules whose outputs are still missing for at "
-            "least one interaction. Computed dynamically — not a static list."
-        ),
-    )
-    feature_placeholders: list[ClusteringFeaturePlaceholder] = Field(
-        default_factory=list,
-        description="Per-interaction enrichment feature state",
+        description="Whether all required enrichment dependencies are satisfied",
     )
     repeat_pattern_metadata: Optional[RepeatPatternMetadata] = Field(
         None, description="Aggregated repeat-issue statistics"
@@ -447,25 +372,15 @@ class CustomerClusteringResponse(BaseModel):
 
     customer_clusters: Optional[CustomerClusterSummary] = Field(
         default=None,
-        description=(
-            "Customer-level aggregation including repeat metrics, "
-            "ticket summary, and average scores. Read-only analysis output."
-        ),
+        description="Customer-level aggregation",
     )
     issue_clusters: list[IssueClusterGroup] = Field(
         default_factory=list,
-        description=(
-            "Semantically grouped issue clusters derived from Qdrant "
-            "similarity search with Union-Find deduplication. "
-            "Read-only analysis output."
-        ),
+        description="Semantically grouped issue clusters",
     )
     time_clusters: list[TimeClusterResult] = Field(
         default_factory=list,
-        description=(
-            "Time-based clustering results at daily, weekly, and monthly "
-            "granularities. Read-only analysis output."
-        ),
+        description="Time-based clustering results",
     )
     persisted: bool = Field(
         default=False,

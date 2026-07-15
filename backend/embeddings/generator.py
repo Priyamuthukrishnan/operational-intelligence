@@ -10,7 +10,7 @@ When MISTRAL_API_KEY is not set, embedding generation is skipped
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
 from core.config import get_settings
 from core.logging import setup_logger
@@ -32,14 +32,14 @@ class EmbeddingGenerator:
     def __init__(self) -> None:
         settings = get_settings()
         self._api_key: Optional[str] = settings.MISTRAL_API_KEY
-        self._client = None
+        self._client: Optional[Any] = None
 
         if self._api_key:
             try:
                 try:
-                    from mistralai import Mistral
+                    from mistralai import Mistral  # type: ignore
                 except ImportError:
-                    from mistralai.client import Mistral
+                    from mistralai.client import Mistral  # type: ignore
 
                 self._client = Mistral(api_key=self._api_key)
                 logger.info(
@@ -85,7 +85,7 @@ class EmbeddingGenerator:
             A list of floats (the embedding vector), or ``None`` if
             generation is unavailable or fails.
         """
-        if not self.is_available:
+        if self._client is None:
             return None
 
         if not text or not text.strip():
@@ -120,7 +120,7 @@ class EmbeddingGenerator:
             A list of embedding vectors (or ``None`` for failures),
             in the same order as the input texts.
         """
-        if not self.is_available:
+        if self._client is None:
             return [None] * len(texts)
 
         # Filter out empty texts but preserve positions

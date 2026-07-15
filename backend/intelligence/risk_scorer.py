@@ -62,12 +62,12 @@ def compute_confidence_decay(
     latest_approval_action: str | None = None,
 ) -> float:
     root_confidences = [
-        float(row.root_cause_confidence)
+        row.root_cause_confidence
         for row in history
         if row.root_cause_confidence is not None
     ]
     ai_confidences = [
-        float(value)
+        value
         for value in (ai_confidences or [])
         if value is not None
     ]
@@ -189,7 +189,7 @@ def apply_multiplier(
 
 
 def normalize_score(score: float) -> int:
-    return max(0, min(100, int(round(score))))
+    return max(0, min(100, round(score)))
 
 
 def map_risk_band(score: int) -> str:
@@ -220,7 +220,7 @@ def build_risk_reason(
     reason: dict = {
         "signals": signals,
         "raw_score": raw_score,
-        "multiplier": float(multiplier),
+        "multiplier": multiplier,
     }
     if multiplier_reason and multiplier_reason != "none":
         reason["multiplier_reason"] = multiplier_reason

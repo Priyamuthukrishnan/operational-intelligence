@@ -24,7 +24,7 @@ from __future__ import annotations
 import uuid
 from collections import defaultdict
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -39,7 +39,6 @@ from utils.scoring import (
     convert_similarity_score,
 )
 from schemas.clustering import (
-    ClusteringFeaturePlaceholder,
     CustomerClusteringResponse,
     CustomerClusterSummary,
     IssueClusterGroup,
@@ -205,7 +204,7 @@ class CustomerClusteringService:
         self._settings = get_settings()
 
         # ── Initialise Qdrant service (optional) ─────────────────────────
-        self._qdrant: Optional[object] = None
+        self._qdrant: Optional[Any] = None
         try:
             from services.qdrant_service import QdrantService
 
@@ -242,56 +241,7 @@ class CustomerClusteringService:
         )
         return interactions
 
-    # ── Feature Preparation ──────────────────────────────────────────────
 
-    def prepare_clustering_features(
-        self, interactions: list[OperationalAnalysis]
-    ) -> list[ClusteringFeaturePlaceholder]:
-        """Extract current enrichment field values from interaction records.
-
-        Maps each interaction to a :class:`ClusteringFeaturePlaceholder`
-        that reflects the present state of each intelligence module output.
-        Fields remain ``None`` until the respective upstream module
-        populates them.
-
-        No clustering logic is applied — this method is a pure data
-        extraction step.
-
-        Future integration points:
-        - Summarization Engine → ``query_summary``, ``response_summary``
-        - Sentiment Engine → ``sentiment_label``, ``sentiment_score``
-        - Escalation Risk Engine → ``escalation_risk_score``
-        - Root Cause Engine → ``root_cause_category``
-        - Embedding Service / Qdrant → ``qdrant_vector_id``
-
-        Args:
-            interactions: List of ORM records to extract features from.
-
-        Returns:
-            A list of feature placeholder schemas.
-        """
-        features = []
-        for interaction in interactions:
-            feature = ClusteringFeaturePlaceholder(
-                interaction_id=interaction.id,
-                ticket_id=interaction.ticket_id,
-                query_summary=interaction.query_summary,
-                response_summary=interaction.response_summary,
-                sentiment_label=interaction.sentiment_label,
-                sentiment_score=interaction.sentiment_score,
-                sentiment_score_out_of_10=convert_sentiment_score(interaction.sentiment_score),
-                escalation_risk_score=interaction.escalation_risk_score,
-                escalation_risk_score_out_of_10=convert_escalation_risk_score(interaction.escalation_risk_score),
-                root_cause_category=interaction.root_cause_category,
-                qdrant_vector_id=interaction.qdrant_vector_id,
-            )
-            features.append(feature)
-
-        logger.info(
-            "Prepared clustering features for %d interaction(s)",
-            len(features),
-        )
-        return features
 
     # ── Repeat Pattern Analysis ──────────────────────────────────────────
 
@@ -455,7 +405,7 @@ class CustomerClusteringService:
         for interaction in interactions:
             norm_db_vid = str(interaction.qdrant_vector_id).lower().strip()
             qdrant_data = qdrant_lookup.get(norm_db_vid)
-            if qdrant_data is None:
+            if qdrant_data is None and interaction.qdrant_vector_id is not None:
                 # Try coerced ID lookup
                 from services.qdrant_service import QdrantService
 
@@ -536,7 +486,7 @@ class CustomerClusteringService:
 
         # Filter out self-match using normalized string comparison
         similar = []
-        norm_source_id = str(vector_id).lower().strip()
+        norm_source_id = vector_id.lower().strip()
         for result in raw_results:
             norm_match_id = str(result["id"]).lower().strip()
             
@@ -586,8 +536,7 @@ class CustomerClusteringService:
             similar.append(
                 SimilarInteraction(
                     interaction_id=result["id"],
-                    similarity_score=result["score"],
-                    similarity_score_out_of_10=convert_similarity_score(result["score"]),
+                    similarity_score=convert_similarity_score(result["score"]),
                     payload=result.get("payload"),
                 )
             )
@@ -650,8 +599,7 @@ class CustomerClusteringService:
                 source_vector_id=entry["vector_id"],
                 similar_interactions=similar,
                 group_size=len(similar),
-                avg_similarity_score=round(avg_score, 4) if avg_score else None,
-                avg_similarity_score_out_of_10=convert_similarity_score(avg_score),
+                similarity_score=round(avg_score, 2) if avg_score is not None else None,
             )
             groups.append(group)
 
@@ -725,16 +673,8 @@ class CustomerClusteringService:
             repeat_count=repeat_count,
             repeated_issue_frequency=repeated_issue_frequency,
             distinct_categories=distinct_categories,
-            avg_sentiment_score=(
-                round(avg_sentiment, 4) if avg_sentiment is not None else None
-            ),
-            avg_sentiment_score_out_of_10=convert_sentiment_score(avg_sentiment),
-            avg_escalation_risk=(
-                round(avg_escalation, 4)
-                if avg_escalation is not None
-                else None
-            ),
-            avg_escalation_risk_out_of_10=convert_escalation_risk_score(avg_escalation),
+            sentiment_score=convert_sentiment_score(avg_sentiment),
+            risk_score=convert_escalation_risk_score(avg_escalation),
             ticket_ids=ticket_ids,
         )
 
@@ -780,7 +720,7 @@ class CustomerClusteringService:
         vector_to_interaction: dict[str, OperationalAnalysis] = {}
         for interaction in interactions:
             if interaction.qdrant_vector_id is not None:
-                norm_key = str(interaction.qdrant_vector_id).lower().strip()
+                norm_key = interaction.qdrant_vector_id.lower().strip()
                 vector_to_interaction[norm_key] = interaction
 
         # Union-Find: merge overlapping similarity groups using normalized keys
@@ -788,9 +728,9 @@ class CustomerClusteringService:
         all_scores: dict[str, list[float]] = defaultdict(list)
 
         for group in similarity_groups:
-            source_vid = str(group.source_vector_id).lower().strip()
+            source_vid = group.source_vector_id.lower().strip()
             for match in group.similar_interactions:
-                matched_vid = str(match.interaction_id).lower().strip()
+                matched_vid = match.interaction_id.lower().strip()
                 uf.union(source_vid, matched_vid)
                 all_scores[source_vid].append(match.similarity_score)
                 all_scores[matched_vid].append(match.similarity_score)
@@ -799,9 +739,9 @@ class CustomerClusteringService:
         clusters_map: dict[str, set[str]] = defaultdict(set)
         all_vids = set()
         for group in similarity_groups:
-            all_vids.add(str(group.source_vector_id).lower().strip())
+            all_vids.add(group.source_vector_id.lower().strip())
             for match in group.similar_interactions:
-                all_vids.add(str(match.interaction_id).lower().strip())
+                all_vids.add(match.interaction_id.lower().strip())
 
         for vid in all_vids:
             root = uf.find(vid)
@@ -843,8 +783,7 @@ class CustomerClusteringService:
                 cluster_label=f"issue_cluster_{cluster_index}",
                 interaction_count=len(interaction_ids),
                 occurrence_count=len(cluster_scores),
-                avg_similarity_score=avg_score,
-                avg_similarity_score_out_of_10=convert_similarity_score(avg_score),
+                similarity_score=avg_score,
                 root_cause_categories=sorted(categories_set),
                 interaction_ids=interaction_ids,
                 ticket_ids=sorted(ticket_ids_set),
@@ -1110,12 +1049,9 @@ class CustomerClusteringService:
                     subticket_ids=[sub.ticket_id for sub in subtickets],
                     first_seen=first_seen,
                     last_seen=last_seen,
-                    avg_similarity_score=round(avg_similarity, 4),
-                    avg_similarity_score_out_of_10=convert_similarity_score(avg_similarity),
-                    avg_sentiment_score=round(avg_sentiment, 4) if avg_sentiment is not None else None,
-                    avg_sentiment_score_out_of_10=convert_sentiment_score(avg_sentiment),
-                    avg_escalation_risk=round(avg_escalation, 4) if avg_escalation is not None else None,
-                    avg_escalation_risk_out_of_10=convert_escalation_risk_score(avg_escalation),
+                    similarity_score=convert_similarity_score(avg_similarity),
+                    sentiment_score=convert_sentiment_score(avg_sentiment),
+                    risk_score=convert_escalation_risk_score(avg_escalation),
                 )
                 repeat_issue_clusters.append(cluster)
 
@@ -1157,7 +1093,6 @@ class CustomerClusteringService:
             and time-based clusters.
         """
         interactions = self.get_customer_interactions(customer_id)
-        features = self.prepare_clustering_features(interactions)
 
         # Dynamically determine pending dependencies from actual data
         pending_dependencies: list[str] = []
@@ -1217,15 +1152,13 @@ class CustomerClusteringService:
                                     rep_vid = i.qdrant_vector_id
                                     break
                             
-                            avg_sim = cluster.avg_similarity_score
+                            avg_sim = cluster.similarity_score
                             detail = RepeatIssueDetail(
                                 source_interaction_id=rep_id,
                                 source_vector_id=rep_vid or "",
                                 occurrence_count=cluster.interaction_count - 1,
                                 similarity_scores=[avg_sim] * (cluster.interaction_count - 1) if avg_sim is not None else [],
-                                similarity_scores_out_of_10=[convert_similarity_score(avg_sim)] * (cluster.interaction_count - 1) if avg_sim is not None else [],
-                                avg_similarity=avg_sim,
-                                avg_similarity_out_of_10=convert_similarity_score(avg_sim),
+                                similarity_score=avg_sim,
                             )
                             repeat_issues.append(detail)
             except Exception as exc:
@@ -1245,11 +1178,15 @@ class CustomerClusteringService:
                 from sqlalchemy import inspect
                 inspector = inspect(self._db.bind)
                 
-                ticket_cols = [c["name"] for c in inspector.get_columns("tickets")]
-                has_ticket_category = "category" in ticket_cols
-                
-                ai_cols = [c["name"] for c in inspector.get_columns("ai_analysis")]
-                has_ai_category = "category_prediction" in ai_cols
+                if inspector is not None:
+                    ticket_cols = [c["name"] for c in inspector.get_columns("tickets")]
+                    has_ticket_category = "category" in ticket_cols
+                    
+                    ai_cols = [c["name"] for c in inspector.get_columns("ai_analysis")]
+                    has_ai_category = "category_prediction" in ai_cols
+                else:
+                    has_ticket_category = False
+                    has_ai_category = False
                 
                 # Fetch category and ticket details for all interactions of this customer to avoid N+1 queries
                 category_rows = (
@@ -1645,8 +1582,6 @@ class CustomerClusteringService:
             vectors_missing=vectors_missing,
             repeat_issues=repeat_issues,
             clustering_ready=clustering_ready,
-            pending_dependencies=pending_dependencies,
-            feature_placeholders=features,
             repeat_pattern_metadata=repeat_metadata,
             customer_clusters=customer_cluster_summary,
             issue_clusters=issue_clusters,

@@ -33,7 +33,7 @@ import json
 import time
 import psycopg2
 
-from mistralai import Mistral
+from mistralai import Mistral  # type: ignore
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:

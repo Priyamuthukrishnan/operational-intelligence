@@ -77,7 +77,7 @@ class QdrantService:
             logger.error(msg)
             raise QdrantConfigError(msg)
 
-        self._collection_name: str = settings.QDRANT_COLLECTION_NAME
+        self._collection_name: str = settings.QDRANT_COLLECTION_NAME or ""
 
         # ── Initialise client ────────────────────────────────────────────
         try:

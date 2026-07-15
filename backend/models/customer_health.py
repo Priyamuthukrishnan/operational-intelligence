@@ -5,8 +5,9 @@ SQLAlchemy database model representing customer health scores, trends, volumes, 
 
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import Column, DateTime, Float, Integer
+from sqlalchemy import DateTime, Float, Integer
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import Mapped, mapped_column
 
 from db.base_class import Base
 
@@ -20,7 +21,7 @@ class CustomerHealth(Base):
 
     __tablename__ = "customer_health"
 
-    id = Column(
+    id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
         default=uuid.uuid4,
@@ -28,7 +29,7 @@ class CustomerHealth(Base):
         comment="Primary key UUID for the customer health record",
     )
 
-    customer_id = Column(
+    customer_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         nullable=False,
         unique=True,
@@ -36,45 +37,45 @@ class CustomerHealth(Base):
         comment="Unique identifier for the customer",
     )
 
-    health_score = Column(
+    health_score: Mapped[float] = mapped_column(
         Float,
         nullable=False,
         default=100.0,
         comment="Composite customer health score (0.0 to 100.0)",
     )
 
-    sentiment_average = Column(
+    sentiment_average: Mapped[float | None] = mapped_column(
         Float,
         nullable=True,
         comment="Average sentiment score (-1.0 to 1.0)",
     )
 
-    escalation_risk_average = Column(
+    escalation_risk_average: Mapped[float | None] = mapped_column(
         Float,
         nullable=True,
         comment="Average escalation risk score (0.0 to 1.0)",
     )
 
-    repeat_issue_frequency = Column(
+    repeat_issue_frequency: Mapped[float | None] = mapped_column(
         Float,
         nullable=True,
         comment="Ratio of repeat interactions to total interactions",
     )
 
-    resolution_rate = Column(
+    resolution_rate: Mapped[float | None] = mapped_column(
         Float,
         nullable=True,
         comment="Ratio of resolved tickets to total tickets",
     )
 
-    interaction_count = Column(
+    interaction_count: Mapped[int] = mapped_column(
         Integer,
         nullable=False,
         default=0,
         comment="Total customer interaction count",
     )
 
-    updated_at = Column(
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),

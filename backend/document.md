@@ -231,9 +231,12 @@ Calculates operational indicators for support engineers and managers, displaying
 | `total_interactions` | `integer` | Count of all processed interaction snapshots |
 | `total_tickets` | `integer` | Count of unique tickets tracked |
 | `resolved_tickets` | `integer` | Count of tickets with response summaries |
-| `resolution_rate` | `float` | Percent of resolved tickets over total tickets |
-| `average_sentiment` | `float` | Mean sentiment score across all records |
-| `average_escalation_risk` | `float` | Mean escalation risk score across all records |
+| `resolution_rate` | `float` | Ratio of resolved tickets over total tickets |
+| `average_sentiment` | `float` | Internal polarity value (-1.0 to +1.0). Do not display as percentage. |
+| `average_sentiment_label` | `string` | Aggregate sentiment label: `positive`, `neutral`, or `negative` |
+| `average_sentiment_out_of_10` | `float` | Sentiment score on a 0-10 display scale |
+| `average_escalation_risk` | `float` | Internal normalized score (0.0 to 1.0). Do not display as percentage. |
+| `average_escalation_risk_out_of_10` | `float` | Escalation risk on a 0-10 display scale |
 | `critical_escalations_count` | `integer` | Count of tickets classified in critical/high risk bands |
 | `recent_escalations` | `list[RecentEscalation]` | List of recent individual high-risk items |
 | `top_categories` | `list[CategoryMetric]` | Categories sorted by occurrence volume |
@@ -246,8 +249,11 @@ Calculates operational indicators for support engineers and managers, displaying
     "total_tickets": 120,
     "resolved_tickets": 90,
     "resolution_rate": 0.75,
-    "average_sentiment": 0.12,
+    "average_sentiment": -0.12,
+    "average_sentiment_label": "negative",
+    "average_sentiment_out_of_10": 4.4,
     "average_escalation_risk": 0.35,
+    "average_escalation_risk_out_of_10": 3.5,
     "critical_escalations_count": 12,
     "recent_escalations": [
       {
@@ -256,7 +262,20 @@ Calculates operational indicators for support engineers and managers, displaying
         "customer_id": "3c983a56-ee25-4c07-ba71-a083d03cb1df",
         "sentiment_label": "negative",
         "escalation_risk_score": 0.89,
-        "escalation_risk_band": "critical",
+        "escalation_risk_score_out_of_10": 8.9,
+        "escalation_risk_band": "CRITICAL",
+        "risk_reason": {
+          "signals": {
+            "escalation": 35,
+            "confidence": 8.0,
+            "repetition": 12,
+            "sentiment": 15,
+            "momentum": 18
+          },
+          "raw_score": 88.0,
+          "multiplier": 1.35,
+          "multiplier_reason": "human escalation with no progress >48h"
+        },
         "query_summary": "Customer cannot access checkout portal",
         "captured_at": "2026-07-09T14:00:00Z"
       }
@@ -296,8 +315,11 @@ Provides high-level insights for leadership teams, showing overall customer heal
 |---|---|---|
 | `overall_health_index` | `float` | Weighted health score across all customer accounts (0-100) |
 | `health_distribution` | `HealthDistribution` | Accounts grouped into healthy, warning, and critical buckets |
-| `average_sentiment` | `float` | Combined mean sentiment score across all customer logs |
-| `average_escalation_risk` | `float` | Combined mean escalation risk score |
+| `average_sentiment` | `float` | Internal polarity value (-1.0 to +1.0). Do not display as percentage. |
+| `average_sentiment_label` | `string` | Aggregate sentiment label: `positive`, `neutral`, or `negative` |
+| `average_sentiment_out_of_10` | `float` | Sentiment score on a 0-10 display scale |
+| `average_escalation_risk` | `float` | Internal normalized score (0.0 to 1.0). Do not display as percentage. |
+| `average_escalation_risk_out_of_10` | `float` | Escalation risk on a 0-10 display scale |
 | `risk_distribution` | `RiskDistribution` | Counts of interactions categorized by risk bands |
 | `weekly_trends` | `list[TrendMetric]` | Historical rolling analytics for weekly intervals |
 | `at_risk_customers` | `list[AtRiskCustomer]` | List of customer accounts requiring urgent outreach |
@@ -306,13 +328,17 @@ Provides high-level insights for leadership teams, showing overall customer heal
   ```json
   {
     "overall_health_index": 78.4,
+    "overall_health_index_out_of_10": 7.84,
     "health_distribution": {
       "healthy_count": 85,
       "warning_count": 14,
       "critical_count": 3
     },
-    "average_sentiment": 0.21,
+    "average_sentiment": -0.21,
+    "average_sentiment_label": "negative",
+    "average_sentiment_out_of_10": 3.95,
     "average_escalation_risk": 0.28,
+    "average_escalation_risk_out_of_10": 2.8,
     "risk_distribution": {
       "critical_count": 3,
       "high_count": 9,
@@ -325,16 +351,23 @@ Provides high-level insights for leadership teams, showing overall customer heal
         "interaction_count": 48,
         "ticket_count": 40,
         "resolution_rate": 0.80,
-        "average_sentiment": 0.18,
-        "average_escalation_risk": 0.31
+        "average_sentiment": -0.18,
+        "average_sentiment_label": "negative",
+        "average_sentiment_out_of_10": 4.1,
+        "average_escalation_risk": 0.31,
+        "average_escalation_risk_out_of_10": 3.1
       }
     ],
     "at_risk_customers": [
       {
         "customer_id": "3c983a56-ee25-4c07-ba71-a083d03cb1df",
         "health_score": 42.0,
+        "health_score_out_of_10": 4.2,
         "sentiment_average": -0.45,
+        "sentiment_average_label": "negative",
+        "sentiment_average_out_of_10": 2.75,
         "escalation_risk_average": 0.72,
+        "escalation_risk_average_out_of_10": 7.2,
         "interaction_count": 8
       }
     ]
@@ -356,8 +389,12 @@ Obtain the complete health dashboard profile, historical timeline, and topic clu
 |---|---|---|
 | `customer_id` | `UUID` | The queried customer identifier |
 | `health_score` | `float` | Customer health score scaled from `0` to `100` |
-| `sentiment_average` | `float` | Historical mean sentiment score |
-| `escalation_risk_average` | `float` | Historical mean risk score |
+| `health_score_out_of_10` | `float` | Customer health score on a 0-10 display scale |
+| `sentiment_average` | `float` | Internal polarity value (-1.0 to +1.0). Do not display as percentage. |
+| `sentiment_average_label` | `string` | Aggregate sentiment label: `positive`, `neutral`, or `negative` |
+| `sentiment_average_out_of_10` | `float` | Sentiment score on a 0-10 display scale |
+| `escalation_risk_average` | `float` | Internal normalized score (0.0 to 1.0). Do not display as percentage. |
+| `escalation_risk_average_out_of_10` | `float` | Escalation risk on a 0-10 display scale |
 | `repeat_issue_frequency` | `float` | Ratio of repeat interactions to total interactions |
 | `resolution_rate` | `float` | Ratio of resolved tickets for this customer |
 | `interaction_count` | `integer` | Total interaction count in database |
@@ -369,8 +406,12 @@ Obtain the complete health dashboard profile, historical timeline, and topic clu
   {
     "customer_id": "3c983a56-ee25-4c07-ba71-a083d03cb1df",
     "health_score": 42.0,
+    "health_score_out_of_10": 4.2,
     "sentiment_average": -0.45,
+    "sentiment_average_label": "negative",
+    "sentiment_average_out_of_10": 2.75,
     "escalation_risk_average": 0.72,
+    "escalation_risk_average_out_of_10": 7.2,
     "repeat_issue_frequency": 0.50,
     "resolution_rate": 0.60,
     "interaction_count": 10,
@@ -382,8 +423,11 @@ Obtain the complete health dashboard profile, historical timeline, and topic clu
         "response_summary": "Assigned to engineering team to fix cookies issue",
         "sentiment_label": "negative",
         "sentiment_score": -0.65,
+        "sentiment_score_raw": -0.65,
+        "sentiment_score_out_of_10": 1.75,
         "escalation_risk_score": 0.82,
-        "escalation_risk_band": "high",
+        "escalation_risk_score_out_of_10": 8.2,
+        "escalation_risk_band": "HIGH",
         "root_cause_category": "Checkout Failure",
         "captured_at": "2026-07-09T14:00:00Z"
       }
@@ -432,12 +476,18 @@ Fetch the latest persisted escalation risk details and risk engine diagnostics (
 |---|---|---|
 | `ticket_id` | `UUID` | Source ticket identifier |
 | `analysis_id` | `UUID` | Primary key of the analysis interaction record |
-| `escalation_risk_score` | `float` | Escalation risk probability (0.0 to 1.0) |
-| `escalation_risk_band` | `string` | Classification band (e.g., `low`, `medium`, `high`, `critical`) |
-| `confidence_decay_score` | `float` | Exponential confidence decay value over time |
+| `sentiment_label` | `string` | Sentiment classification: `positive`, `neutral`, or `negative` |
+| `sentiment_score` | `float` | Internal polarity value (-1.0 to +1.0). Do not display as percentage. |
+| `sentiment_score_raw` | `float` | Explicit copy of internal polarity for analysis pipelines |
+| `sentiment_score_out_of_10` | `float` | Sentiment on a 0-10 display scale |
+| `escalation_risk_score` | `float` | Internal normalized score (0.0 to 1.0). Do not display as percentage. |
+| `escalation_risk_score_out_of_10` | `float` | Escalation risk on a 0-10 display scale |
+| `escalation_risk_band` | `string` | Classification band: `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` |
+| `confidence_decay_score` | `float` | Confidence decay value (0.0 to 20.0) |
+| `confidence_decay_score_out_of_10` | `float` | Confidence decay on a 0-10 display scale |
 | `momentum_score` | `float` | Interaction velocity/momentum factor |
 | `risk_multiplier` | `float` | Calculated multiplier applied to baseline risk |
-| `risk_reason` | `string` | Natural language explanation justifying the risk level |
+| `risk_reason` | `object` | Signal breakdown explaining how the risk score was calculated |
 | `risk_processed` | `boolean` | Flag indicating whether risk processing has finished |
 | `captured_at` | `datetime` | Timestamp of calculation snapshot |
 
@@ -446,13 +496,75 @@ Fetch the latest persisted escalation risk details and risk engine diagnostics (
   {
     "ticket_id": "060d4e33-728f-4ad1-b223-289569fae7c9",
     "analysis_id": "b0f7dc68-60cf-46d5-a3cc-93e185854898",
-    "escalation_risk_score": 0.89,
-    "escalation_risk_band": "critical",
-    "confidence_decay_score": 0.95,
-    "momentum_score": 1.25,
-    "risk_multiplier": 1.15,
-    "risk_reason": "Multiple repeated negative sentiment comments detected in short interval without successful agent resolution.",
+    "sentiment_label": "negative",
+    "sentiment_score": -0.27,
+    "sentiment_score_raw": -0.27,
+    "sentiment_score_out_of_10": 3.65,
+    "escalation_risk_score": 0.10,
+    "escalation_risk_score_out_of_10": 1.0,
+    "escalation_risk_band": "LOW",
+    "confidence_decay_score": 0.0,
+    "confidence_decay_score_out_of_10": 0.0,
+    "momentum_score": 0.0,
+    "risk_multiplier": 1.0,
+    "risk_reason": {
+      "signals": {
+        "escalation": 0,
+        "confidence": 0.0,
+        "repetition": 0,
+        "sentiment": 10,
+        "momentum": 0
+      },
+      "raw_score": 10.0,
+      "multiplier": 1.0
+    },
     "risk_processed": true,
     "captured_at": "2026-07-09T14:00:00Z"
   }
   ```
+
+---
+
+## Score Presentation Guide
+
+> ** Critical: Do not format internal scores as percentages.**
+
+### Sentiment Scores
+
+| Field | Range | Usage |
+|---|---|---|
+| `sentiment_label` | `positive`, `neutral`, `negative` | **Primary display value.** Use this for UI labels. |
+| `sentiment_score_out_of_10` | `0.0` – `10.0` | **Numeric display value.** Use for charts and numeric indicators. |
+| `sentiment_score` | `-1.0` – `+1.0` | Internal polarity. Do **not** display as a percentage. Retained for backward compatibility. |
+| `sentiment_score_raw` | `-1.0` – `+1.0` | Explicit copy of `sentiment_score` for analysis pipelines. |
+
+**Conversion formula:** `sentiment_score_out_of_10 = ((sentiment_score + 1) / 2) × 10`
+
+**Example:** `sentiment_score = -0.27` → `sentiment_score_out_of_10 = 3.65` → `sentiment_label = "negative"`
+
+** Never do:** `-0.27 × 100 = -27%`
+
+### Escalation Risk Scores
+
+| Field | Range | Usage |
+|---|---|---|
+| `escalation_risk_band` | `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` | **Primary display value.** |
+| `escalation_risk_score_out_of_10` | `0.0` – `10.0` | **Numeric display value.** |
+| `escalation_risk_score` | `0.0` – `1.0` | Internal normalized score. Do **not** display as a percentage. |
+| `risk_reason` | `object` | Signal breakdown explaining the score composition. |
+
+**Conversion formula:** `escalation_risk_score_out_of_10 = escalation_risk_score × 10`
+
+**Example:** `escalation_risk_score = 0.10` → `escalation_risk_score_out_of_10 = 1.0` → `escalation_risk_band = "LOW"`
+
+** Never do:** `0.10 × 100 = 10%` without explaining the signal breakdown
+
+### Aggregate Sentiment Labels
+
+`average_sentiment_label` and `sentiment_average_label` are derived from the average polarity using the same thresholds as the Sentiment Engine:
+
+```
+if average_sentiment > 0: label = "positive"
+if average_sentiment < 0: label = "negative"
+if average_sentiment == 0: label = "neutral"
+```

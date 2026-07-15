@@ -8,7 +8,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 from typing import Any, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 # ── Operational Dashboard Schemas ─────────────────────────────────────────
@@ -19,6 +19,12 @@ class CategoryMetric(BaseModel):
 
     category: str = Field(..., description="Root cause category label")
     count: int = Field(..., description="Number of interactions in this category")
+
+    @field_validator("category", mode="before", check_fields=False)
+    @classmethod
+    def validate_category(cls, v: Any) -> Any:
+        from utils.scoring import normalize_category_name
+        return normalize_category_name(v)
 
 
 class RecentEscalation(BaseModel):
@@ -35,10 +41,13 @@ class RecentEscalation(BaseModel):
         default=None,
         description="Human-readable customer name"
     )
-    sentiment_label: Optional[str] = Field(None, description="Sentiment classification")
-    escalation_risk_score: float = Field(..., description="Escalation risk probability")
-    escalation_risk_score_out_of_10: Optional[float] = Field(None, description="Escalation risk score scaled out of 10")
-    escalation_risk_band: str = Field(..., description="Risk band: high or critical")
+    sentiment_label: Optional[str] = Field(None, description="Sentiment classification (positive, neutral, negative)")
+    risk_score: float = Field(..., description="Escalation risk score on a 0-10 scale")
+    risk_band: str = Field(..., description="Risk band: LOW, MEDIUM, HIGH, or CRITICAL")
+    risk_reason: Optional[dict[str, Any]] = Field(
+        default=None,
+        description="Detailed signal breakdown explaining how the escalation risk score was calculated"
+    )
     query_summary: Optional[str] = Field(None, description="Query summary statement")
     repeat_count: Optional[int] = Field(
         default=None,
@@ -62,6 +71,12 @@ class RecentCluster(BaseModel):
     frequency_count: int = Field(..., description="Number of members in the cluster")
     last_seen_at: Optional[datetime] = Field(None, description="Timestamp of most recent member")
 
+    @field_validator("issue_category", mode="before", check_fields=False)
+    @classmethod
+    def validate_issue_category(cls, v: Any) -> Any:
+        from utils.scoring import normalize_category_name
+        return normalize_category_name(v)
+
 
 class OperationalDashboardResponse(BaseModel):
     """Data payload for the Operational/Support team dashboard."""
@@ -70,10 +85,9 @@ class OperationalDashboardResponse(BaseModel):
     total_tickets: int = Field(..., description="Total unique tickets captured")
     resolved_tickets: int = Field(..., description="Total resolved tickets (has response summary)")
     resolution_rate: float = Field(..., description="Ratio of resolved tickets")
-    average_sentiment: Optional[float] = Field(None, description="Average sentiment score")
-    average_sentiment_out_of_10: Optional[float] = Field(None, description="Average sentiment score scaled out of 10")
-    average_escalation_risk: Optional[float] = Field(None, description="Average escalation risk score")
-    average_escalation_risk_out_of_10: Optional[float] = Field(None, description="Average escalation risk score scaled out of 10")
+    sentiment_score: Optional[float] = Field(None, description="Average sentiment score on a 0-10 scale")
+    average_sentiment_label: Optional[str] = Field(None, description="Aggregate sentiment label derived from average sentiment (positive, neutral, negative)")
+    risk_score: Optional[float] = Field(None, description="Average escalation risk score on a 0-10 scale")
     critical_escalations_count: int = Field(..., description="Number of critical/high risk tickets")
     recent_escalations: list[RecentEscalation] = Field(
         default_factory=list, description="Recent high-risk escalations"
@@ -113,10 +127,9 @@ class TrendMetric(BaseModel):
     interaction_count: int = Field(..., description="Total interactions during the period")
     ticket_count: int = Field(..., description="Total unique tickets during the period")
     resolution_rate: float = Field(..., description="Resolution rate during the period")
-    average_sentiment: Optional[float] = Field(None, description="Average sentiment score")
-    average_sentiment_out_of_10: Optional[float] = Field(None, description="Average sentiment score scaled out of 10")
-    average_escalation_risk: Optional[float] = Field(None, description="Average escalation risk")
-    average_escalation_risk_out_of_10: Optional[float] = Field(None, description="Average escalation risk score scaled out of 10")
+    sentiment_score: Optional[float] = Field(None, description="Average sentiment score on a 0-10 scale")
+    average_sentiment_label: Optional[str] = Field(None, description="Aggregate sentiment label derived from average sentiment (positive, neutral, negative)")
+    risk_score: Optional[float] = Field(None, description="Average escalation risk score on a 0-10 scale")
 
 
 class AtRiskCustomer(BaseModel):
@@ -128,11 +141,9 @@ class AtRiskCustomer(BaseModel):
         description="Human-readable customer name"
     )
     health_score: float = Field(..., description="Current customer health score (0-100)")
-    health_score_out_of_10: Optional[float] = Field(None, description="Current customer health score scaled out of 10")
-    sentiment_average: Optional[float] = Field(None, description="Average sentiment score")
-    sentiment_average_out_of_10: Optional[float] = Field(None, description="Average sentiment score scaled out of 10")
-    escalation_risk_average: Optional[float] = Field(None, description="Average escalation risk")
-    escalation_risk_average_out_of_10: Optional[float] = Field(None, description="Average escalation risk score scaled out of 10")
+    sentiment_score: Optional[float] = Field(None, description="Average sentiment score on a 0-10 scale")
+    sentiment_average_label: Optional[str] = Field(None, description="Aggregate sentiment label derived from sentiment score (positive, neutral, negative)")
+    risk_score: Optional[float] = Field(None, description="Average escalation risk score on a 0-10 scale")
     interaction_count: int = Field(..., description="Total interactions for this customer")
 
 
@@ -140,12 +151,10 @@ class ExecutiveDashboardResponse(BaseModel):
     """Data payload for the C-suite Executive summary dashboard."""
 
     overall_health_index: float = Field(..., description="Average health score across all customer accounts")
-    overall_health_index_out_of_10: Optional[float] = Field(None, description="Average health score scaled out of 10")
     health_distribution: HealthDistribution = Field(..., description="Breakdown of customer account health states")
-    average_sentiment: Optional[float] = Field(None, description="Mean sentiment score across all interactions")
-    average_sentiment_out_of_10: Optional[float] = Field(None, description="Mean sentiment score scaled out of 10")
-    average_escalation_risk: Optional[float] = Field(None, description="Mean escalation risk across all interactions")
-    average_escalation_risk_out_of_10: Optional[float] = Field(None, description="Mean escalation risk scaled out of 10")
+    sentiment_score: Optional[float] = Field(None, description="Average sentiment score on a 0-10 scale")
+    average_sentiment_label: Optional[str] = Field(None, description="Aggregate sentiment label derived from sentiment score (positive, neutral, negative)")
+    risk_score: Optional[float] = Field(None, description="Average escalation risk score on a 0-10 scale")
     risk_distribution: RiskDistribution = Field(..., description="Risk classification profile of interactions")
     weekly_trends: list[TrendMetric] = Field(
         default_factory=list, description="Weekly rolling analytics trends"
@@ -165,15 +174,19 @@ class CustomerInteractionDetail(BaseModel):
     ticket_id: uuid.UUID = Field(..., description="Source ticket identifier")
     query_summary: Optional[str] = Field(None, description="Customer problem summary")
     response_summary: Optional[str] = Field(None, description="Action taken resolution summary")
-    sentiment_label: Optional[str] = Field(None, description="Sentiment classification")
-    sentiment_score: Optional[float] = Field(None, description="Sentiment score")
-    sentiment_score_out_of_10: Optional[float] = Field(None, description="Sentiment score scaled out of 10")
-    escalation_risk_score: Optional[float] = Field(None, description="Escalation risk score")
-    escalation_risk_score_out_of_10: Optional[float] = Field(None, description="Escalation risk score scaled out of 10")
-    escalation_risk_band: Optional[str] = Field(None, description="Escalation risk band")
-    root_cause_confidence_out_of_10: Optional[float] = Field(None, description="Root cause confidence score scaled out of 10")
+    sentiment_label: Optional[str] = Field(None, description="Sentiment classification (positive, neutral, negative)")
+    sentiment_score: Optional[float] = Field(None, description="Sentiment score on a 0-10 scale")
+    risk_score: Optional[float] = Field(None, description="Escalation risk score on a 0-10 scale")
+    risk_band: Optional[str] = Field(None, description="Escalation risk band")
+    confidence_score: Optional[float] = Field(None, description="Root cause confidence score scaled to 0-10")
     root_cause_category: Optional[str] = Field(None, description="Predicted root cause category")
     captured_at: datetime = Field(..., description="Timestamp event was captured")
+
+    @field_validator("root_cause_category", mode="before", check_fields=False)
+    @classmethod
+    def validate_root_cause_category(cls, v: Any) -> Any:
+        from utils.scoring import normalize_category_name
+        return normalize_category_name(v)
 
 
 class CustomerDashboardResponse(BaseModel):
@@ -181,11 +194,9 @@ class CustomerDashboardResponse(BaseModel):
 
     customer_id: uuid.UUID = Field(..., description="The queried customer identifier")
     health_score: float = Field(..., description="Composite customer health score (0-100)")
-    health_score_out_of_10: Optional[float] = Field(None, description="Composite customer health score scaled out of 10")
-    sentiment_average: Optional[float] = Field(None, description="Average sentiment score")
-    sentiment_average_out_of_10: Optional[float] = Field(None, description="Average sentiment score scaled out of 10")
-    escalation_risk_average: Optional[float] = Field(None, description="Average escalation risk score")
-    escalation_risk_average_out_of_10: Optional[float] = Field(None, description="Average escalation risk score scaled out of 10")
+    sentiment_score: Optional[float] = Field(None, description="Average sentiment score on a 0-10 scale")
+    sentiment_average_label: Optional[str] = Field(None, description="Aggregate sentiment label derived from sentiment score (positive, neutral, negative)")
+    risk_score: Optional[float] = Field(None, description="Average escalation risk score on a 0-10 scale")
     repeat_issue_frequency: Optional[float] = Field(None, description="Ratio of repeat interactions")
     resolution_rate: Optional[float] = Field(None, description="Ratio of resolved tickets")
     interaction_count: int = Field(..., description="Total interaction records found")
@@ -195,3 +206,6 @@ class CustomerDashboardResponse(BaseModel):
     clusters: list[RecentCluster] = Field(
         default_factory=list, description="Topic/issue clusters associated with this customer"
     )
+
+
+

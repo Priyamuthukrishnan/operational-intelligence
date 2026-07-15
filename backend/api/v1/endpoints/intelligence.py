@@ -15,6 +15,7 @@ from core.logging import setup_logger
 from repositories.interaction_repository import InteractionRepository
 from schemas.intelligence import TicketRiskResponse
 from utils.scoring import (
+    convert_sentiment_score,
     convert_escalation_risk_score,
     convert_confidence_decay_score,
 )
@@ -49,11 +50,11 @@ def get_ticket_risk(
     return {
         "ticket_id": ticket_id,
         "analysis_id": analysis.id,
-        "escalation_risk_score": analysis.escalation_risk_score,
-        "escalation_risk_score_out_of_10": convert_escalation_risk_score(analysis.escalation_risk_score),
-        "escalation_risk_band": analysis.escalation_risk_band,
-        "confidence_decay_score": analysis.confidence_decay_score,
-        "confidence_decay_score_out_of_10": convert_confidence_decay_score(analysis.confidence_decay_score),
+        "sentiment_label": analysis.sentiment_label,
+        "sentiment_score": convert_sentiment_score(analysis.sentiment_score),
+        "risk_score": convert_escalation_risk_score(analysis.escalation_risk_score),
+        "risk_band": analysis.escalation_risk_band,
+        "confidence_score": convert_confidence_decay_score(analysis.confidence_decay_score),
         "momentum_score": analysis.momentum_score,
         "risk_multiplier": analysis.risk_multiplier,
         "risk_reason": analysis.risk_reason,
