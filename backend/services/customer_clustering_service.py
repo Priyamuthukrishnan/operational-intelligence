@@ -536,7 +536,7 @@ class CustomerClusteringService:
             similar.append(
                 SimilarInteraction(
                     interaction_id=result["id"],
-                    similarity_score=convert_similarity_score(result["score"]),
+                    similarity_score=convert_similarity_score(result["score"]) or 0.0,
                     payload=result.get("payload"),
                 )
             )
@@ -1049,7 +1049,7 @@ class CustomerClusteringService:
                     subticket_ids=[sub.ticket_id for sub in subtickets],
                     first_seen=first_seen,
                     last_seen=last_seen,
-                    similarity_score=convert_similarity_score(avg_similarity),
+                    similarity_score=convert_similarity_score(avg_similarity) or 0.0,
                     sentiment_score=convert_sentiment_score(avg_sentiment),
                     risk_score=convert_escalation_risk_score(avg_escalation),
                 )

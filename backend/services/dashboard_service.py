@@ -65,7 +65,7 @@ class DashboardService:
                 customer_id=e.customer_id,
                 customer_name=customer_name,
                 sentiment_label=e.sentiment_label,
-                risk_score=convert_escalation_risk_score(e.escalation_risk_score or 0.0),
+                risk_score=convert_escalation_risk_score(e.escalation_risk_score) or 0.0,
                 risk_band=e.escalation_risk_band or "HIGH",
                 risk_reason=e.risk_reason,
                 query_summary=e.query_summary,
