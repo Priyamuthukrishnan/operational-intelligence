@@ -5,13 +5,15 @@ to supply clean structures to dashboard router endpoints.
 """
 
 from __future__ import annotations
-
+ 
 import uuid
+from typing import Any
 from sqlalchemy.orm import Session
-
+ 
 from core.logging import setup_logger
 from repositories.dashboard_repository import DashboardRepository
 from repositories.customer_health_repository import CustomerHealthRepository
+from models.ticket_rollup import TicketRollup
 
 logger = setup_logger(__name__)
 from utils.scoring import (
@@ -126,11 +128,30 @@ class DashboardService:
             recent_clusters=recent_clusters,
         )
 
+    def _build_trend_metrics(self, trends: list[TicketRollup]) -> list[TrendMetric]:
+        """Convert TicketRollup records to TrendMetric schemas."""
+        return [
+            TrendMetric(
+                period_label=t.period_label,
+                interaction_count=t.interaction_count,
+                ticket_count=t.ticket_count,
+                resolution_rate=t.resolution_rate,
+                sentiment_score=convert_sentiment_score(t.average_sentiment),
+                average_sentiment_label=sentiment_label_from_score(t.average_sentiment),
+                risk_score=convert_escalation_risk_score(t.average_escalation_risk),
+            )
+            for t in trends
+        ]
+
     def get_executive_dashboard(self) -> ExecutiveDashboardResponse:
         """Fetch and format C-suite summary dashboard details."""
         health_stats = self.repo.get_overall_health_stats()
         risk_counts = self.repo.get_risk_distribution()
-        trends = self.repo.get_weekly_trends(limit=8)
+        
+        daily_trends_data = self.repo.get_daily_trends(limit=8)
+        weekly_trends_data = self.repo.get_weekly_trends(limit=8)
+        monthly_trends_data = self.repo.get_monthly_trends(limit=8)
+        
         at_risk_list = self.repo.get_at_risk_customers(limit=5)
 
         # Totals and global averages
@@ -149,18 +170,9 @@ class DashboardService:
             low_count=risk_counts["low"],
         )
 
-        weekly_trends = [
-            TrendMetric(
-                period_label=t.period_label,
-                interaction_count=t.interaction_count,
-                ticket_count=t.ticket_count,
-                resolution_rate=t.resolution_rate,
-                sentiment_score=convert_sentiment_score(t.average_sentiment),
-                average_sentiment_label=sentiment_label_from_score(t.average_sentiment),
-                risk_score=convert_escalation_risk_score(t.average_escalation_risk),
-            )
-            for t in trends
-        ]
+        daily_trends = self._build_trend_metrics(daily_trends_data)
+        weekly_trends = self._build_trend_metrics(weekly_trends_data)
+        monthly_trends = self._build_trend_metrics(monthly_trends_data)
 
         at_risk_customers = []
         for c, customer_name in at_risk_list:
@@ -188,7 +200,9 @@ class DashboardService:
             average_sentiment_label=sentiment_label_from_score(general_stats["average_sentiment"]),
             risk_score=convert_escalation_risk_score(general_stats["average_escalation_risk"]),
             risk_distribution=risk_dist,
+            daily_trends=daily_trends,
             weekly_trends=weekly_trends,
+            monthly_trends=monthly_trends,
             at_risk_customers=at_risk_customers,
         )
 

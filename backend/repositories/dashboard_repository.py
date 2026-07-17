@@ -218,11 +218,31 @@ class DashboardRepository:
 
         return counts
 
+    def get_daily_trends(self, limit: int = 8) -> list[TicketRollup]:
+        """Fetch daily rollup records for trend analytics."""
+        return (
+            self.db.query(TicketRollup)
+            .filter(TicketRollup.granularity == "daily")
+            .order_by(desc(TicketRollup.period_label))
+            .limit(limit)
+            .all()
+        )[::-1]  # Return in chronological order (oldest to newest)
+
     def get_weekly_trends(self, limit: int = 8) -> list[TicketRollup]:
         """Fetch weekly rollup records for trend analytics."""
         return (
             self.db.query(TicketRollup)
             .filter(TicketRollup.granularity == "weekly")
+            .order_by(desc(TicketRollup.period_label))
+            .limit(limit)
+            .all()
+        )[::-1]  # Return in chronological order (oldest to newest)
+
+    def get_monthly_trends(self, limit: int = 8) -> list[TicketRollup]:
+        """Fetch monthly rollup records for trend analytics."""
+        return (
+            self.db.query(TicketRollup)
+            .filter(TicketRollup.granularity == "monthly")
             .order_by(desc(TicketRollup.period_label))
             .limit(limit)
             .all()

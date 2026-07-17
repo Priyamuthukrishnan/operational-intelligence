@@ -156,8 +156,14 @@ class ExecutiveDashboardResponse(BaseModel):
     average_sentiment_label: Optional[str] = Field(None, description="Aggregate sentiment label derived from sentiment score (positive, neutral, negative)")
     risk_score: Optional[float] = Field(None, description="Average escalation risk score on a 0-10 scale")
     risk_distribution: RiskDistribution = Field(..., description="Risk classification profile of interactions")
+    daily_trends: list[TrendMetric] = Field(
+        default_factory=list, description="Daily rolling analytics trends"
+    )
     weekly_trends: list[TrendMetric] = Field(
         default_factory=list, description="Weekly rolling analytics trends"
+    )
+    monthly_trends: list[TrendMetric] = Field(
+        default_factory=list, description="Monthly rolling analytics trends"
     )
     at_risk_customers: list[AtRiskCustomer] = Field(
         default_factory=list, description="Top customer accounts requiring attention"
