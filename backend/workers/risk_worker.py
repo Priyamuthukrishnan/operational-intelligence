@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import text
@@ -29,13 +30,24 @@ def _fetch_ticket_signals(
         "ai_confidences": [],
         "ticket_status": None,
         "latest_activity_at": None,
+        "parent_ticket_id": None,
+        "sub_ticket_count": 0,
+        "occurrence_count": 1,
+        "is_manager_escalated": False,
+        "comment_count": 0,
+        "follow_up_count": 0,
+        "reassignment_count": 0,
+        "priority": "MEDIUM",
+        "due_at": None,
+        "sla_breached": False,
+        "initial_ai_confidence": None,
     }
 
     try:
         ticket_row = session.execute(
             text(
                 """
-                SELECT status, updated_at
+                SELECT status, updated_at, priority, due_at
                 FROM tickets
                 WHERE id = :ticket_id
                 """
@@ -43,13 +55,55 @@ def _fetch_ticket_signals(
             {"ticket_id": ticket_id},
         ).mappings().first()
         if ticket_row is not None:
-            payload["ticket_status"] = ticket_row["status"]
-            payload["latest_activity_at"] = ticket_row["updated_at"]
+            payload["ticket_status"] = ticket_row.get("status")
+            payload["latest_activity_at"] = ticket_row.get("updated_at")
+            if ticket_row.get("priority"):
+                payload["priority"] = ticket_row["priority"]
+            if ticket_row.get("due_at"):
+                payload["due_at"] = ticket_row["due_at"]
     except Exception:
         logger.warning(
             "Unable to load ticket metadata for ticket_id=%s", ticket_id,
             exc_info=True,
         )
+
+    # Sub-tickets & Parent Ticket Hierarchy
+    try:
+        parent_row = session.execute(
+            text(
+                """
+                SELECT ticket_id
+                FROM sub_tickets
+                WHERE id = :ticket_id
+                """
+            ),
+            {"ticket_id": ticket_id},
+        ).mappings().first()
+        if parent_row is not None:
+            payload["parent_ticket_id"] = parent_row.get("ticket_id")
+    except Exception:
+        pass
+
+    try:
+        sub_count_row = session.execute(
+            text(
+                """
+                SELECT COUNT(*) AS sub_count
+                FROM sub_tickets
+                WHERE ticket_id = :ticket_id
+                """
+            ),
+            {"ticket_id": ticket_id},
+        ).mappings().first()
+        if sub_count_row is not None:
+            payload["sub_ticket_count"] = int(sub_count_row.get("sub_count") or 0)
+    except Exception:
+        pass
+
+    if payload["parent_ticket_id"] is not None:
+        payload["occurrence_count"] = max(2, payload["sub_ticket_count"] + 1)
+    elif payload["sub_ticket_count"] > 0:
+        payload["occurrence_count"] = 1 + payload["sub_ticket_count"]
 
     try:
         for row in session.execute(
@@ -63,10 +117,13 @@ def _fetch_ticket_signals(
             ),
             {"ticket_id": ticket_id},
         ).mappings():
-            if row["source_used"] is not None:
+            if row.get("source_used") is not None:
                 payload["escalation_source"] = row["source_used"]
-            if row["confidence_score"] is not None:
-                payload["ai_confidences"].append(float(row["confidence_score"]))
+            if row.get("confidence_score") is not None:
+                conf_val = float(row["confidence_score"])
+                if payload["initial_ai_confidence"] is None:
+                    payload["initial_ai_confidence"] = conf_val
+                payload["ai_confidences"].append(conf_val)
     except Exception:
         logger.warning(
             "Unable to load ai_analysis signals for ticket_id=%s", ticket_id,
@@ -74,7 +131,6 @@ def _fetch_ticket_signals(
         )
 
     # Bypassed: recommendations table does not exist in production schema.
-    # Risk scorer handles recommendation_source=None via existing fallback.
     payload["recommendation_source"] = None
 
     try:
@@ -91,7 +147,10 @@ def _fetch_ticket_signals(
             {"ticket_id": ticket_id},
         ).mappings().first()
         if approval_row is not None:
-            payload["approval_action"] = approval_row["action"]
+            action = str(approval_row.get("action") or "").lower()
+            payload["approval_action"] = approval_row.get("action")
+            if action in {"escalated", "escalation_requested", "approved", "manager_review"}:
+                payload["is_manager_escalated"] = True
     except Exception:
         logger.warning(
             "Unable to load approval history for ticket_id=%s", ticket_id,
@@ -102,23 +161,63 @@ def _fetch_ticket_signals(
         comment_row = session.execute(
             text(
                 """
-                SELECT MAX(created_at) AS latest_comment_at
+                SELECT COUNT(*) AS total_comments, MAX(created_at) AS latest_comment_at
                 FROM comments
                 WHERE ticket_id = :ticket_id
                 """
             ),
             {"ticket_id": ticket_id},
         ).mappings().first()
-        latest_comment_at = comment_row["latest_comment_at"] if comment_row else None
-        if latest_comment_at is not None:
-            existing = payload["latest_activity_at"]
-            if existing is None or latest_comment_at > existing:
-                payload["latest_activity_at"] = latest_comment_at
+        if comment_row is not None:
+            payload["comment_count"] = int(comment_row.get("total_comments") or 0)
+            latest_comment_at = comment_row.get("latest_comment_at")
+            if latest_comment_at is not None:
+                existing = payload["latest_activity_at"]
+                if existing is None or latest_comment_at > existing:
+                    payload["latest_activity_at"] = latest_comment_at
     except Exception:
         logger.warning(
             "Unable to load comment activity for ticket_id=%s", ticket_id,
             exc_info=True,
         )
+
+    # Follow-up count: sub-ticket comments represent customer follow-up engagement
+    if payload["sub_ticket_count"] > 0:
+        try:
+            sub_comment_row = session.execute(
+                text(
+                    """
+                    SELECT COUNT(*) AS follow_up_comments
+                    FROM sub_ticket_comments
+                    WHERE sub_ticket_id IN (
+                        SELECT id FROM sub_tickets WHERE ticket_id = :ticket_id
+                    )
+                    """
+                ),
+                {"ticket_id": ticket_id},
+            ).mappings().first()
+            if sub_comment_row is not None:
+                payload["follow_up_count"] = max(
+                    payload["follow_up_count"],
+                    int(sub_comment_row.get("follow_up_comments") or 0),
+                )
+        except Exception:
+            logger.warning(
+                "Unable to load sub-ticket follow-up comments for ticket_id=%s", ticket_id,
+                exc_info=True,
+            )
+
+    # Derive SLA breach status from due_at if not already set
+    if not payload["sla_breached"] and payload["due_at"] is not None:
+        try:
+            due = payload["due_at"]
+            if due.tzinfo is None:
+                due = due.replace(tzinfo=timezone.utc)
+            status = str(payload.get("ticket_status") or "").lower()
+            if due < datetime.now(timezone.utc) and status not in {"resolved", "closed", "cancelled"}:
+                payload["sla_breached"] = True
+        except (TypeError, ValueError):
+            pass
 
     return payload
 
@@ -163,6 +262,7 @@ def process_ticket_risk(
             ai_confidences=signals["ai_confidences"],
             ticket_status=signals["ticket_status"],
             latest_activity_at=signals["latest_activity_at"],
+            signals=signals,
         )
         latest = history[-1]
 

@@ -117,7 +117,7 @@ class EnrichmentOrchestrator:
 
             # Step 2: Fetch raw ticket and AI analysis source text for complete issue chain
             main_ticket_query = text("""
-                SELECT id, title, description, customer_name, created_by, resolution, status, created_at, updated_at, assigned_to
+                SELECT id, title, description, customer_name, created_by, resolution, status, created_at, updated_at, assigned_to, priority, due_at
                 FROM tickets
                 WHERE id = :ticket_id
                 LIMIT 1
@@ -437,6 +437,42 @@ class EnrichmentOrchestrator:
                 if valid_timestamps:
                     risk_signals["latest_activity_at"] = max(valid_timestamps)
 
+            # Enrich risk_signals with full operational context available in orchestrator
+            sub_ticket_count = len(sub_tickets)
+            total_comment_count = len(main_comments) + len(sub_comments)
+            risk_signals["sub_ticket_count"] = sub_ticket_count
+            risk_signals["occurrence_count"] = 1 + sub_ticket_count if sub_ticket_count > 0 else 1
+            risk_signals["comment_count"] = total_comment_count
+            risk_signals["follow_up_count"] = sub_ticket_count  # each sub-ticket represents a follow-up
+            risk_signals["reassignment_count"] = 0  # not available without assignment audit log
+            risk_signals["priority"] = main_ticket.get("priority") or "MEDIUM"
+            risk_signals["due_at"] = main_ticket.get("due_at")
+            risk_signals["sla_breached"] = False
+            risk_signals["is_manager_escalated"] = False
+
+            # Derive SLA breach from due_at
+            due_at_val = main_ticket.get("due_at")
+            if due_at_val is not None:
+                try:
+                    due_utc = ensure_utc(due_at_val)
+                    from datetime import datetime as dt, timezone as tz
+                    ticket_status_lower = str(main_ticket.get("status") or "").lower()
+                    if due_utc and due_utc < dt.now(tz.utc) and ticket_status_lower not in {"resolved", "closed", "cancelled"}:
+                        risk_signals["sla_breached"] = True
+                except (TypeError, ValueError):
+                    pass
+
+            # Manager escalation from approval history
+            approval_action_val = str(risk_signals.get("approval_action") or "").lower()
+            if approval_action_val in {"escalated", "escalation_requested", "approved", "manager_review"}:
+                risk_signals["is_manager_escalated"] = True
+
+            # Initial AI confidence
+            if risk_signals["ai_confidences"]:
+                risk_signals["initial_ai_confidence"] = risk_signals["ai_confidences"][0]
+            else:
+                risk_signals["initial_ai_confidence"] = None
+
             ticket_history = self.repository.get_ticket_history(record.ticket_id)
             risk_result = compute_escalation_risk(
                 ticket_history,
@@ -446,6 +482,7 @@ class EnrichmentOrchestrator:
                 ai_confidences=risk_signals["ai_confidences"],
                 ticket_status=risk_signals["ticket_status"],
                 latest_activity_at=risk_signals["latest_activity_at"],
+                signals=risk_signals,
             )
             risk_score = risk_result["escalation_risk_score"]
             risk_band = risk_result["escalation_risk_band"]

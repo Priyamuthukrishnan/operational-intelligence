@@ -35,6 +35,7 @@ from schemas.dashboard import (
     AtRiskCustomer,
     CustomerDashboardResponse,
     CustomerInteractionDetail,
+    EscalationTimelinePoint,
 )
 
 
@@ -82,6 +83,16 @@ class DashboardService:
             CategoryMetric(category=cat, count=cnt) for cat, cnt in categories
         ]
 
+        daily_timeline = [
+            EscalationTimelinePoint(**point) for point in self.repo.get_escalation_timeline("daily")
+        ]
+        weekly_timeline = [
+            EscalationTimelinePoint(**point) for point in self.repo.get_escalation_timeline("weekly")
+        ]
+        monthly_timeline = [
+            EscalationTimelinePoint(**point) for point in self.repo.get_escalation_timeline("monthly")
+        ]
+
         from models.operational_analysis import OperationalAnalysis
         from repositories.dashboard_repository import users_table
 
@@ -126,6 +137,9 @@ class DashboardService:
             recent_escalations=recent_escalations,
             top_categories=top_categories,
             recent_clusters=recent_clusters,
+            daily_escalation_timeline=daily_timeline,
+            weekly_escalation_timeline=weekly_timeline,
+            monthly_escalation_timeline=monthly_timeline,
         )
 
     def _build_trend_metrics(self, trends: list[TicketRollup]) -> list[TrendMetric]:

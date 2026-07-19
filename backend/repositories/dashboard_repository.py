@@ -17,6 +17,7 @@ from models.ticket_rollup import TicketRollup
 from sqlalchemy import Table, Column, String
 from sqlalchemy.dialects.postgresql import UUID
 from db.base_class import Base
+from utils.date_helpers import get_daily_key, get_weekly_key, get_monthly_key
 
 users_table = Table(
     "users",
@@ -106,7 +107,7 @@ class DashboardRepository:
             self.db.query(
                 OperationalAnalysis,
                 tickets_table.c.ticket_key.label("ticket_key"),
-                customer_name_expr
+                customer_name_expr,
             )
             .outerjoin(tickets_table, tickets_table.c.id == OperationalAnalysis.ticket_id)
             .outerjoin(u_oa, u_oa.c.id == OperationalAnalysis.customer_id)
@@ -122,14 +123,14 @@ class DashboardRepository:
                             "closed",
                             "auto_closed",
                             "auto-closed",
-                            "cancelled"
-                        ])
-                    )
-                )
+                            "cancelled",
+                        ]),
+                    ),
+                ),
             )
             .order_by(desc(OperationalAnalysis.captured_at))
             .limit(limit)
-            .all()
+            .all(),
         )
 
     def get_top_categories(self, limit: int = 5) -> list[tuple[str, int]]:
@@ -247,6 +248,86 @@ class DashboardRepository:
             .limit(limit)
             .all()
         )[::-1]  # Return in chronological order (oldest to newest)
+
+    def _get_escalation_timeline_rows(self) -> list[OperationalAnalysis]:
+        """Return escalation-related interactions that should appear on the recent risk timeline."""
+        return (
+            self.db.query(OperationalAnalysis)
+            .filter(
+                OperationalAnalysis.risk_processed == True,
+                or_(
+                    func.upper(func.coalesce(OperationalAnalysis.escalation_risk_band, "")).in_(["HIGH", "CRITICAL"]),
+                    and_(
+                        func.coalesce(OperationalAnalysis.repeat_count, 0) >= 1,
+                        func.lower(func.coalesce(OperationalAnalysis.resolution_state, "")).notin_([
+                            "resolved",
+                            "closed",
+                            "auto_closed",
+                            "auto-closed",
+                            "cancelled",
+                        ]),
+                    ),
+                ),
+            )
+            .order_by(OperationalAnalysis.captured_at.asc())
+            .all()
+        )
+
+    def get_escalation_timeline(self, granularity: str) -> list[dict[str, Any]]:
+        """Build a daily/weekly/monthly escalation timeline from recent escalation records."""
+        if granularity == "daily":
+            key_fn = get_daily_key
+        elif granularity == "weekly":
+            key_fn = get_weekly_key
+        elif granularity == "monthly":
+            key_fn = get_monthly_key
+        else:
+            return []
+
+        groups: dict[str, list[OperationalAnalysis]] = {}
+        for interaction in self._get_escalation_timeline_rows():
+            key = key_fn(interaction.captured_at)
+            if key == "unknown":
+                continue
+            groups.setdefault(key, []).append(interaction)
+
+        timeline: list[dict[str, Any]] = []
+        for period_label in sorted(groups):
+            period_interactions = groups[period_label]
+            counts = {
+                "critical": 0,
+                "high": 0,
+                "medium": 0,
+                "low": 0,
+            }
+            manager_escalations = 0
+
+            for interaction in period_interactions:
+                band = str(interaction.escalation_risk_band or "").strip().lower()
+                if band in counts:
+                    counts[band] += 1
+
+                risk_reason = interaction.risk_reason or {}
+                if isinstance(risk_reason, dict):
+                    multiplier_reason = risk_reason.get("multiplier_reason")
+                    business = risk_reason.get("business") or {}
+                    manager_status = business.get("manager_escalation", {}).get("status")
+                    if multiplier_reason == "Manager escalation active" or manager_status == "Escalated":
+                        manager_escalations += 1
+
+            timeline.append(
+                {
+                    "period_label": period_label,
+                    "total_escalations": len(period_interactions),
+                    "manager_escalations": manager_escalations,
+                    "critical_escalations": counts["critical"],
+                    "high_escalations": counts["high"],
+                    "medium_escalations": counts["medium"],
+                    "low_escalations": counts["low"],
+                }
+            )
+
+        return timeline
 
     def get_at_risk_customers(
         self, limit: int = 5

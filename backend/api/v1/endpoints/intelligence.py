@@ -47,6 +47,45 @@ def get_ticket_risk(
             detail=f"Risk not available for ticket {ticket_id}",
         )
 
+    risk_reason = analysis.risk_reason or {}
+    business_data = risk_reason.get("business")
+    if not business_data:
+        raw_score = float(risk_reason.get("raw_score", 0))
+        final_score = int(round(raw_score * float(analysis.risk_multiplier or 1.0)))
+        final_score = max(0, min(100, final_score))
+        band = analysis.escalation_risk_band or "LOW"
+        sentiment_label = analysis.sentiment_label or "Neutral"
+        recommendation = risk_reason.get("recommendation") or "Continue normal SLA handling."
+        business_data = {
+            "overall_risk": {
+                "score": final_score,
+                "band": band,
+            },
+            "incident_history": {
+                "repeated_issue": False,
+                "occurrences": 1,
+                "sub_tickets": 0,
+            },
+            "customer_sentiment": {
+                "label": sentiment_label,
+            },
+            "manager_escalation": {
+                "status": "Escalated" if band in {"HIGH", "CRITICAL"} else "Not Required",
+            },
+            "operational_insight": {
+                "title": "Standard Ticket Progress" if band == "LOW" else "Operational Risk Detected",
+                "summary": risk_reason.get("summary") or "Ticket risk snapshot processed.",
+                "top_factors": risk_reason.get("reasons") or ["Standard operational progress"],
+            },
+            "recommendation": recommendation,
+            "primary_recommendation": recommendation,
+            "supporting_observations": [],
+            "lifecycle_stage": None,
+            "priority": None,
+            "ticket_age_hours": None,
+            "activity_summary": None,
+        }
+
     return {
         "ticket_id": ticket_id,
         "analysis_id": analysis.id,
@@ -60,5 +99,7 @@ def get_ticket_risk(
         "risk_reason": analysis.risk_reason,
         "risk_processed": analysis.risk_processed,
         "captured_at": analysis.captured_at,
+        "business": business_data,
     }
+
 

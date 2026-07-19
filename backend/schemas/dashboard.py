@@ -60,6 +60,18 @@ class RecentEscalation(BaseModel):
     captured_at: datetime = Field(..., description="Timestamp event was captured")
 
 
+class EscalationTimelinePoint(BaseModel):
+    """Aggregated escalation counts for a single day/week/month period."""
+
+    period_label: str = Field(..., description="Day, ISO week, or month label")
+    total_escalations: int = Field(..., description="Total escalation events in the period")
+    manager_escalations: int = Field(..., description="Escalation events flagged as manager escalations")
+    critical_escalations: int = Field(..., description="Escalation events in the critical band")
+    high_escalations: int = Field(..., description="Escalation events in the high band")
+    medium_escalations: int = Field(..., description="Escalation events in the medium band")
+    low_escalations: int = Field(..., description="Escalation events in the low band")
+
+
 class RecentCluster(BaseModel):
     """Summary of a recently generated issue cluster."""
 
@@ -97,6 +109,15 @@ class OperationalDashboardResponse(BaseModel):
     )
     recent_clusters: list[RecentCluster] = Field(
         default_factory=list, description="Recently updated issue clusters"
+    )
+    daily_escalation_timeline: list[EscalationTimelinePoint] = Field(
+        default_factory=list, description="Daily escalation timeline data for the recent escalation widget"
+    )
+    weekly_escalation_timeline: list[EscalationTimelinePoint] = Field(
+        default_factory=list, description="Weekly escalation timeline data for the recent escalation widget"
+    )
+    monthly_escalation_timeline: list[EscalationTimelinePoint] = Field(
+        default_factory=list, description="Monthly escalation timeline data for the recent escalation widget"
     )
 
 
