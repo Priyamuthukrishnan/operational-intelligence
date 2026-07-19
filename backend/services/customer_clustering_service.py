@@ -77,6 +77,10 @@ ai_analysis_table = Table(
 
 CATEGORY_NORMALIZATION = {
     "access_management": "Access Management",
+    "access_permission": "Access Management",
+    "configuration_error": "Configuration Error",
+    "configuration error": "Configuration Error",
+    "configuration": "Configuration Error",
     "service_outage": "Service Outage",
     "user_error": "User Error",
     "integration_failure": "Integration Failure",
@@ -87,8 +91,9 @@ CATEGORY_NORMALIZATION = {
     "reporting": "Reporting",
     "database": "Database",
     "network": "Network",
-    "general_support": "General Support",
-    "general support": "General Support",
+    "general_support": "General",
+    "general support": "General",
+    "general": "General",
 }
 
 SUBJECT_MAPPING = {
@@ -126,8 +131,8 @@ SUBJECT_MAPPING = {
 }
 
 def _normalize_category(cat: str | None) -> str:
-    if not cat:
-        return "General Support"
+    if not cat or cat.strip().lower() == "unknown":
+        return "General"
     cat_clean = cat.strip().lower().replace("_", " ").replace("-", " ")
     if cat_clean in CATEGORY_NORMALIZATION:
         return CATEGORY_NORMALIZATION[cat_clean]
@@ -1264,7 +1269,7 @@ class CustomerClusteringService:
                             ticket_ints = [i for i in cluster_interactions if i.ticket_id == tid]
                             raw_cat = None
                             
-                            # 1. ai_analysis.category_prediction
+                            # 1. ai_analysis.category_prediction (ignore internal "unknown")
                             if has_ai_category:
                                 for i in ticket_ints:
                                     if i.ai_analysis_id:
@@ -1273,28 +1278,34 @@ class CustomerClusteringService:
                                             {"aid": i.ai_analysis_id}
                                         ).mappings().first()
                                         if ai_row and ai_row["category_prediction"]:
-                                            raw_cat = ai_row["category_prediction"]
-                                            break
+                                            cand = str(ai_row["category_prediction"]).strip()
+                                            if cand.lower() != "unknown":
+                                                raw_cat = cand
+                                                break
                                 if raw_cat:
                                     ticket_resolved_categories[tid] = raw_cat
                                     continue
                                     
-                            # 2. tickets.category
+                            # 2. tickets.category (ignore internal "unknown")
                             if has_ticket_category:
                                 ticket_row = self._db.execute(
                                     text("SELECT category FROM tickets WHERE id = :tid"),
                                     {"tid": tid}
                                 ).mappings().first()
                                 if ticket_row and ticket_row["category"]:
-                                    raw_cat = ticket_row["category"]
-                                    ticket_resolved_categories[tid] = raw_cat
-                                    continue
+                                    cand = str(ticket_row["category"]).strip()
+                                    if cand.lower() != "unknown":
+                                        raw_cat = cand
+                                        ticket_resolved_categories[tid] = raw_cat
+                                        continue
                                     
-                            # 3. operational_analysis.root_cause_category
+                            # 3. operational_analysis.root_cause_category (ignore internal "unknown")
                             for i in ticket_ints:
                                 if i.root_cause_category:
-                                    raw_cat = i.root_cause_category
-                                    break
+                                    cand = str(i.root_cause_category).strip()
+                                    if cand.lower() != "unknown":
+                                        raw_cat = cand
+                                        break
                             if raw_cat:
                                 ticket_resolved_categories[tid] = raw_cat
                                 continue
@@ -1324,6 +1335,8 @@ class CustomerClusteringService:
                                 "password": "Access Management",
                                 "access": "Access Management",
                                 "permission": "Access Management",
+                                "config": "Configuration Error",
+                                "configuration": "Configuration Error",
                                 "report": "Reporting",
                                 "db": "Database",
                                 "database": "Database",
@@ -1344,16 +1357,18 @@ class CustomerClusteringService:
                                 ticket_resolved_categories[tid] = raw_cat
                                 continue
                                 
-                            # 5. General Support
-                            ticket_resolved_categories[tid] = "General Support"
+                            # 5. General fallback
+                            ticket_resolved_categories[tid] = "General"
                             
                         # Get dominant resolved category
                         resolved_cats = list(ticket_resolved_categories.values())
-                        dominant_raw_cat = Counter(resolved_cats).most_common(1)[0][0] if resolved_cats else "General Support"
+                        dominant_raw_cat = Counter(resolved_cats).most_common(1)[0][0] if resolved_cats else "General"
                         
                         # Normalize display label
                         def _normalize_display_category(cat: str) -> str:
                             cat_clean = cat.strip().lower().replace("_", " ").replace("-", " ")
+                            if cat_clean in ("unknown", "general_support", "general support", "general"):
+                                return "General"
                             if cat_clean in ("access_management", "access management", "access_permission"):
                                 return "Access Management"
                             if cat_clean in ("performance_degradation", "performance degradation"):
@@ -1403,13 +1418,13 @@ class CustomerClusteringService:
                             cluster_name = subject_hits.most_common(1)[0][0]
                         else:
                             rc_list = [interaction_meta.get(mid, {}).get("root_cause") for mid in cluster.interaction_ids]
-                            rc_candidates = [r for r in rc_list if r]
+                            rc_candidates = [r for r in rc_list if r and r.lower() != "unknown"]
                             rc_dominant = Counter(rc_candidates).most_common(1)[0][0] if rc_candidates else "General"
                             rc_clean = rc_dominant.replace("_", " ").title()
                             if rc_clean.lower() in display_cat.lower():
                                 cluster_name = f"{rc_clean} Access and Setup Issues" if "access" in rc_clean.lower() else f"{rc_clean} System Issues"
                             else:
-                                cluster_name = f"{rc_clean} {display_cat} System Issues"
+                                cluster_name = f"{rc_clean} {display_cat} System Issues" if rc_clean != "General" else f"{display_cat} System Issues"
                                 
                         # Map to broad category ensuring agreement with name keywords
                         def _map_to_broad_category(display_c: str, c_name: str) -> str:
@@ -1456,7 +1471,7 @@ class CustomerClusteringService:
                                 return "Service Outage"
                             if "software" in cat_lower:
                                 return "Software"
-                            return "General Support"
+                            return "General"
                             
                         issue_cat = _map_to_broad_category(display_cat, cluster_name)
                         cluster.cluster_label = cluster_name
