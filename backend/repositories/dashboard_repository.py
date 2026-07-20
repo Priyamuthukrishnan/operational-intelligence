@@ -303,7 +303,7 @@ class DashboardRepository:
             manager_escalations = 0
 
             for interaction in period_interactions:
-                band = str(interaction.escalation_risk_band or "").strip().lower()
+                band = (interaction.escalation_risk_band or "").strip().lower()
                 if band in counts:
                     counts[band] += 1
 

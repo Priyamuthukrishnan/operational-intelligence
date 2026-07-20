@@ -43,6 +43,11 @@ class CustomerHealthScorer:
         """
         # 1. Sentiment Score Component (range: 0 to 100, neutral is 50)
         if sentiment_average is not None:
+            if sentiment_average < -1.0 or sentiment_average > 1.0:
+                logger.warning(
+                    "CustomerHealthScorer received out-of-bounds sentiment_average %.2f (expected [-1.0, 1.0])",
+                    sentiment_average,
+                )
             sentiment_average = max(-1.0, min(1.0, sentiment_average))
             s_comp = (sentiment_average + 1.0) / 2.0 * 100.0
         else:

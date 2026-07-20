@@ -33,7 +33,10 @@ import json
 import time
 import psycopg2
 
-from mistralai import Mistral  # type: ignore
+try:
+    from mistralai import Mistral  # type: ignore
+except ImportError:
+    Mistral = None
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
@@ -65,7 +68,7 @@ REQUEST_DELAY_SECONDS = float(os.getenv("ENRICHMENT_REQUEST_DELAY", "2"))
 # Mistral helper
 # -------------------------------------------------------------------------
 def call_llm(prompt):
-    if not MISTRAL_API_KEY:
+    if not MISTRAL_API_KEY or Mistral is None:
         return None
     client = Mistral(api_key=MISTRAL_API_KEY)
     response = client.chat.complete(
@@ -122,6 +125,10 @@ Text:
     return output
 
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 # -------------------------------------------------------------------------
 # Offline sentiment (fallback when no API key)
 # -------------------------------------------------------------------------
@@ -132,10 +139,43 @@ def fallback_sentiment(text):
                 "problem", "slow", "escalate", "third time"]
     score = sum(w in text for w in positive) - sum(w in text for w in negative)
     if score > 0:
-        return "positive", min(score / 5, 1)
+        return "positive", min(score / 5.0, 1.0)
     if score < 0:
-        return "negative", max(score / 5, -1)
+        return "negative", max(score / 5.0, -1.0)
     return "neutral", 0.0
+
+
+def normalize_and_clamp_sentiment_score(score: float | int | str) -> float:
+    """Ensure sentiment score strictly adheres to canonical [-1.0, 1.0] scale.
+
+    If score is outside [-1.0, 1.0] (e.g. on a 0-10 scale), normalizes it and logs a warning.
+    """
+    try:
+        original = float(score)
+    except (TypeError, ValueError):
+        return 0.0
+
+    normalized = original
+
+    if original < -1.0 or original > 1.0:
+        if 0.0 <= original <= 10.0:
+            normalized = round((original - 5.0) / 5.0, 4)
+            logger.warning(
+                "Un-normalized sentiment score %.2f detected (0-10 scale). "
+                "Normalized to canonical [-1.0, +1.0] scale: %.4f",
+                original,
+                normalized,
+            )
+        else:
+            clamped = max(-1.0, min(1.0, original))
+            logger.warning(
+                "Out-of-bounds sentiment score %.2f detected. Clamping to [-1.0, +1.0]: %.4f",
+                original,
+                clamped,
+            )
+            normalized = clamped
+
+    return max(-1.0, min(1.0, normalized))
 
 
 # -------------------------------------------------------------------------
@@ -144,7 +184,7 @@ def fallback_sentiment(text):
 # risk and customer health score later.
 # -------------------------------------------------------------------------
 def analyze_sentiment(text):
-    if not text:
+    if not text or not text.strip():
         return "neutral", 0.0
     prompt = f"""Analyze ONLY the customer's sentiment in the text below.
 Calibrate the score honestly — do not default to a strong negative score just
@@ -154,17 +194,29 @@ only frustration, anger, or repeated complaints should score strongly negative.
 Return ONLY valid JSON, no commentary:
 {{"label":"positive|neutral|negative","score":0.0}}
 
+CRITICAL INSTRUCTION FOR SCORE:
+- "score" MUST be a float strictly between -1.0 (strongly negative) and +1.0 (strongly positive).
+- 0.0 represents neutral sentiment. Do NOT return scores on a 0-10 or 1-5 scale.
+
 Customer Text:
 {text}"""
     output = call_llm(prompt)
     if output is None:
-        return fallback_sentiment(text)
+        label, score = fallback_sentiment(text)
+        return label, normalize_and_clamp_sentiment_score(score)
     try:
         cleaned = output.replace("```json", "").replace("```", "").strip()
         data = json.loads(cleaned)
-        return data["label"], float(data["score"])
-    except Exception:
-        return fallback_sentiment(text)
+        label = str(data.get("label", "neutral")).lower()
+        if label not in ("positive", "neutral", "negative"):
+            label = "neutral"
+        raw_score = float(data.get("score", 0.0))
+        canonical_score = normalize_and_clamp_sentiment_score(raw_score)
+        return label, canonical_score
+    except Exception as exc:
+        logger.warning("Error parsing sentiment JSON output: %s. Using fallback.", exc)
+        label, score = fallback_sentiment(text)
+        return label, normalize_and_clamp_sentiment_score(score)
 
 
 # -------------------------------------------------------------------------

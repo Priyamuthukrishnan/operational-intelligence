@@ -82,15 +82,19 @@ def convert_health_score(score: Optional[Union[float, int]]) -> Optional[float]:
     except (ValueError, TypeError):
         return None
 
+from core.logging import setup_logger
+
+logger = setup_logger(__name__)
+
 def sentiment_label_from_score(score: Optional[Union[float, int]]) -> Optional[str]:
-    """Derive an aggregate sentiment label from an average sentiment score.
+    """Derive an aggregate sentiment label from a canonical average sentiment score in [-1.0, 1.0].
 
-    Uses the same polarity thresholds as SentimentEngine:
-      score > 0  → ``"positive"``
-      score < 0  → ``"negative"``
-      score == 0 → ``"neutral"``
+    Uses the canonical polarity thresholds:
+      score > 0  → "positive"
+      score < 0  → "negative"
+      score == 0 → "neutral"
 
-    Returns ``None`` when *score* is ``None``.
+    Returns None when score is None.
     """
     if score is None:
         return None
@@ -98,6 +102,13 @@ def sentiment_label_from_score(score: Optional[Union[float, int]]) -> Optional[s
         val = float(score)
     except (ValueError, TypeError):
         return None
+
+    if val < -1.0 or val > 1.0:
+        logger.warning(
+            "sentiment_label_from_score received out-of-bounds sentiment score %.2f (expected [-1.0, 1.0])",
+            val,
+        )
+
     if val > 0:
         return "positive"
     if val < 0:
